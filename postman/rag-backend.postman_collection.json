@@ -1,0 +1,37 @@
+{
+  "info": {
+    "name": "RAG Backend",
+    "description": "Requests for the conversational RAG backend. Start the API with: uvicorn app.main:app --reload",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "base_url", "value": "http://localhost:8000" }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "request": {
+        "method": "GET",
+        "url": "{{base_url}}/health"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+              "pm.test('All services ok', () => {",
+              "  const body = pm.response.json();",
+              "  pm.expect(body.status).to.eql('ok');",
+              "  pm.expect(body.qdrant).to.eql('ok');",
+              "  pm.expect(body.redis).to.eql('ok');",
+              "});",
+              "pm.test('Has X-Request-ID header', () => pm.response.to.have.header('X-Request-ID'));"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}
