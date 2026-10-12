@@ -1,0 +1,11 @@
+{
+  "_comment": "One entry per file in documents/. Fill in when you download the manuals (Step 2). document_id must be unique, lowercase, no spaces.",
+  "documents": [
+    {
+      "file": "tplink_archer_ax55_user_guide.pdf",
+      "document_id": "tplink_archer_ax55",
+      "brand": "tplink",
+      "model": "Archer AX55"
+    }
+  ]
+}

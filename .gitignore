@@ -1,0 +1,21 @@
+# Secrets
+.env
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Editors / OS
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
+
+# Source manuals (large, copyrighted; keep manifest.json only)
+documents/*.pdf
+
+# Evaluation outputs
+evaluation/results/*
+!evaluation/results/.gitkeep
