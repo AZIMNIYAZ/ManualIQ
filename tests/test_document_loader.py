@@ -26,7 +26,7 @@ def test_loads_txt_and_md_as_single_page(tmp_path):
     assert [d.document_id for d in docs] == ["acme_faq", "acme_guide"]
     assert docs[0].brand == "acme" and docs[0].source == "faq.txt"
     assert len(docs[0].pages) == 1 and docs[0].pages[0].page_number == 1
-    assert "holding the button" in docs[0].pages[0].text
+    assert "holding the button" in docs[0].pages[0].raw_text
 
 
 def test_missing_manifest(tmp_path):

@@ -26,15 +26,15 @@ def main() -> None:
     if len(sys.argv) == 3:
         doc_id, page_no = sys.argv[1], int(sys.argv[2])
         doc = next(d for d in docs if d.document_id == doc_id)
-        print(doc.pages[page_no - 1].text)
+        print(doc.pages[page_no - 1].raw_text)
         return
 
     tok = AutoTokenizer.from_pretrained(settings.embedding_model)
     print(f"{'document_id':20} {'brand':8} {'pages':>5} {'empty':>5} {'chars':>8} {'tokens':>7} {'median/page':>11}")
     total_tokens = 0
     for d in docs:
-        counts = [len(tok.encode(p.text, add_special_tokens=False)) for p in d.pages]
-        empty = sum(1 for p in d.pages if len(p.text.strip()) < 30)
+        counts = [len(tok.encode(p.raw_text, add_special_tokens=False)) for p in d.pages]
+        empty = sum(1 for p in d.pages if len(p.raw_text.strip()) < 30)
         total_tokens += sum(counts)
         print(
             f"{d.document_id:20} {d.brand:8} {len(d.pages):5} {empty:5} {d.text_length:8} "

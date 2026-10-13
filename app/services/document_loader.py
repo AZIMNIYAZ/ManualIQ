@@ -70,8 +70,8 @@ def load_manifest(documents_dir: str | Path) -> list[ManifestEntry]:
 def _read_pages(path: Path) -> list[Page]:
     if path.suffix.lower() == ".pdf":
         reader = PdfReader(path)
-        return [Page(page_number=i, text=page.extract_text() or "") for i, page in enumerate(reader.pages, start=1)]
-    return [Page(page_number=1, text=path.read_text(encoding="utf-8"))]
+        return [Page(page_number=i, raw_text=page.extract_text() or "") for i, page in enumerate(reader.pages, start=1)]
+    return [Page(page_number=1, raw_text=path.read_text(encoding="utf-8"))]
 
 
 def load_document(entry: ManifestEntry, documents_dir: str | Path) -> Document:
