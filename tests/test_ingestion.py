@@ -45,6 +45,11 @@ class FakeEmbedder:
             rows.append(v / np.linalg.norm(v))
         return np.vstack(rows)
 
+    def embed_query(self, text):
+        from app.services.embedding_service import QueryEmbedding
+        return QueryEmbedding(vector=self.embed_documents([text])[0], token_count=len(text.split()) + 11,
+                              truncated=False)
+
 
 def procedure(name: str, steps: int) -> str:
     lines = [f"Configure {name}", f"This section explains how to configure {name} on the router.",

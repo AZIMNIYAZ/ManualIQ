@@ -1,40 +1,45 @@
 {
-  "_comment": "One entry per file in documents/. document_id must be unique, lowercase, no spaces. brand values are used for retrieval filtering.",
+  "_comment": "One entry per file in documents/. document_id must be unique, lowercase, no spaces. brand values are used for retrieval filtering; aliases are the names that identify the brand in a question.",
   "documents": [
     {
       "file": "tplink_archer_ax55.pdf",
       "document_id": "tplink_archer_ax55",
       "brand": "tplink",
       "model": "Archer AX55",
-      "source_file": "tp-link_Archer AX55_UG_REV1.0.0.pdf"
+      "source_file": "tp-link_Archer AX55_UG_REV1.0.0.pdf",
+      "aliases": ["TP-Link", "TPLink", "TP Link", "Archer AX55", "Archer"]
     },
     {
       "file": "netgear_rax50.pdf",
       "document_id": "netgear_rax50",
       "brand": "netgear",
       "model": "Nighthawk RAX50",
-      "source_file": "NETGEAR-RAX50_UM_EN.pdf"
+      "source_file": "NETGEAR-RAX50_UM_EN.pdf",
+      "aliases": ["Netgear", "Nighthawk", "RAX50"]
     },
     {
       "file": "asus_rt_ax58u.pdf",
       "document_id": "asus_rt_ax58u",
       "brand": "asus",
       "model": "RT-AX58U V2",
-      "source_file": "ASUS-E23448_RT-AX58U_V2_UM_V2_WEB.pdf"
+      "source_file": "ASUS-E23448_RT-AX58U_V2_UM_V2_WEB.pdf",
+      "aliases": ["ASUS", "RT-AX58U"]
     },
     {
       "file": "dlink_dir_x1560.pdf",
       "document_id": "dlink_dir_x1560",
       "brand": "dlink",
       "model": "DIR-X1560",
-      "source_file": "D-LINK_DIR-X1560_REVA_MANUAL_v1.00_WW.pdf"
+      "source_file": "D-LINK_DIR-X1560_REVA_MANUAL_v1.00_WW.pdf",
+      "aliases": ["D-Link", "DLink", "D Link", "DIR-X1560"]
     },
     {
       "file": "tenda_wifi6.pdf",
       "document_id": "tenda_ax3000",
       "brand": "tenda",
       "model": "AX3000 Wi-Fi 6 series (RX12 Pro / TX12 Pro)",
-      "source_file": "tenda-wifi6-20230130160159_7414.pdf"
+      "source_file": "tenda-wifi6-20230130160159_7414.pdf",
+      "aliases": ["Tenda", "RX12 Pro", "TX12 Pro"]
     }
   ]
 }

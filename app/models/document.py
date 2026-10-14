@@ -11,6 +11,8 @@ class ManifestEntry(BaseModel):
     brand: str = Field(pattern=r"^[a-z0-9_]+$")
     model: str
     source_file: str | None = None  # original download name, for reference only
+    # Names that identify this brand in a question ("TP-Link", "Archer AX55"); used for brand detection
+    aliases: list[str] = []
 
 
 class Manifest(BaseModel):

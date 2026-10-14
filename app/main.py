@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from app.api import health, ingest
+from app.api import health, ingest, search
 from app.core.config import get_settings
 from app.core.logging import RequestIdMiddleware, setup_logging
 from app.database.qdrant import create_qdrant_client
@@ -41,6 +41,7 @@ def create_app() -> FastAPI:
     app.add_middleware(RequestIdMiddleware)
     app.include_router(health.router)
     app.include_router(ingest.router)
+    app.include_router(search.router)
     return app
 
 
