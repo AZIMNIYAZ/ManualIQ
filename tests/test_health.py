@@ -20,7 +20,11 @@ services_running = pytest.mark.skipif(
 def test_all_ok(make_client):
     r = make_client().get("/health")
     assert r.status_code == 200
-    assert r.json() == {"status": "ok", "api": "ok", "qdrant": "ok", "redis": "ok", "details": {}}
+    assert r.json() == {
+        "status": "ok", "api": "ok", "qdrant": "ok", "redis": "ok",
+        "collection": {"name": "rag_350_60", "exists": False, "points": None},  # not ingested: still 200
+        "details": {},
+    }
 
 
 def test_qdrant_down_returns_503(make_client):

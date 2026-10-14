@@ -5,11 +5,12 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from app.api import health
+from app.api import health, ingest
 from app.core.config import get_settings
 from app.core.logging import RequestIdMiddleware, setup_logging
 from app.database.qdrant import create_qdrant_client
 from app.database.redis import create_redis_client
+from app.services.embedding_service import get_embedding_service
 
 logger = logging.getLogger("app")
 
@@ -21,7 +22,11 @@ async def lifespan(app: FastAPI):
     # Qdrant or Redis is down; /health reports that instead.
     app.state.qdrant = create_qdrant_client(settings)
     app.state.redis = create_redis_client(settings)
-    logger.info("Startup complete", extra={"fields": {"qdrant_url": settings.qdrant_url, "collection": settings.qdrant_collection}})
+    # The embedding model is loaded once; if it is missing, startup fails with a clear error
+    app.state.embedder = get_embedding_service()
+    logger.info("Startup complete", extra={"fields": {
+        "qdrant_url": settings.qdrant_url, "collection": settings.collection_name,
+        "embedding_model": app.state.embedder.model_version}})
     yield
     app.state.qdrant.close()
     app.state.redis.close()
@@ -35,7 +40,7 @@ def create_app() -> FastAPI:
     app = FastAPI(title=settings.app_name, version="0.1.0", lifespan=lifespan)
     app.add_middleware(RequestIdMiddleware)
     app.include_router(health.router)
-    # Step 6+: app.include_router(ingest.router, prefix="/api/v1") etc.
+    app.include_router(ingest.router)
     return app
 
 

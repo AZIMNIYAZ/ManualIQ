@@ -19,6 +19,7 @@ from functools import lru_cache
 from typing import Protocol
 
 import numpy as np
+from fastapi import Request
 
 from app.core.config import Settings, get_settings
 
@@ -131,3 +132,8 @@ def create_embedding_service(settings: Settings) -> BgeEmbeddingService:
 def get_embedding_service() -> BgeEmbeddingService:
     """The shared service: the model is loaded once per process."""
     return create_embedding_service(get_settings())
+
+
+def get_embedder(request: Request) -> EmbeddingService:
+    """FastAPI dependency: the service loaded at app startup."""
+    return request.app.state.embedder

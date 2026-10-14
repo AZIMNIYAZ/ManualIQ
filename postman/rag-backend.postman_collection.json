@@ -5,7 +5,8 @@
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
-    { "key": "base_url", "value": "http://localhost:8000" }
+    { "key": "base_url", "value": "http://127.0.0.1:8000" },
+    { "key": "collection", "value": "rag_350_60" }
   ],
   "item": [
     {
@@ -29,6 +30,59 @@
               "});",
               "pm.test('Has X-Request-ID header', () => pm.response.to.have.header('X-Request-ID'));"
             ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Ingest (takes ~2 minutes)",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\n  \"recreate\": false\n}" },
+        "url": "{{base_url}}/api/v1/ingest"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+              "pm.test('All chunks indexed and verified', () => {",
+              "  const body = pm.response.json();",
+              "  pm.expect(body.status).to.eql('success');",
+              "  pm.expect(body.collection_state).to.eql('updated');",
+              "  pm.expect(body.chunks_indexed).to.eql(body.chunks_created);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Ingest - recreate (deletes and rebuilds the collection)",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\n  \"recreate\": true,\n  \"confirm\": \"{{collection}}\"\n}" },
+        "url": "{{base_url}}/api/v1/ingest"
+      }
+    },
+    {
+      "name": "Ingest - recreate without confirm (expect 400)",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\n  \"recreate\": true\n}" },
+        "url": "{{base_url}}/api/v1/ingest"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": ["pm.test('Refused with 400', () => pm.response.to.have.status(400));"]
           }
         }
       ]

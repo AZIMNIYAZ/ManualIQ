@@ -39,8 +39,12 @@ class Settings(BaseSettings):
 
     # Qdrant
     qdrant_url: str = "http://127.0.0.1:6333"
-    qdrant_collection: str = "rag_350_60"
-    qdrant_timeout_seconds: int = Field(2, gt=0)
+    # The collection name is derived from the chunk settings (see collection_name), so a
+    # collection called rag_200_40 can only ever hold 200/40 chunks
+    qdrant_collection_prefix: str = Field("rag", pattern=r"^[a-z][a-z0-9_]*$")
+    qdrant_collection_suffix: str = Field("", pattern=r"^[a-z0-9_]*$")  # e.g. "ctx" for an experiment variant
+    qdrant_timeout_seconds: int = Field(2, gt=0)  # local upserts of 128 points take milliseconds
+    qdrant_upsert_batch_size: int = Field(128, gt=0)
 
     # Redis
     redis_host: str = "127.0.0.1"
@@ -65,6 +69,16 @@ class Settings(BaseSettings):
         if self.embedding_dim != BGE_SMALL_DIM:
             raise ValueError(f"EMBEDDING_DIM must be {BGE_SMALL_DIM} for {self.embedding_model}")
         return self
+
+    @property
+    def collection_name(self) -> str:
+        """rag_350_60, or rag_350_60_ctx with a suffix."""
+        name = f"{self.qdrant_collection_prefix}_{self.chunk_size}_{self.chunk_overlap}"
+        return f"{name}_{self.qdrant_collection_suffix}" if self.qdrant_collection_suffix else name
+
+    @property
+    def chunking(self) -> str:
+        return f"{self.chunk_size}/{self.chunk_overlap}"
 
 
 @lru_cache

@@ -15,6 +15,9 @@ class FakeQdrant:
             raise ConnectionError("Connection refused")
         return []
 
+    def collection_exists(self, name):
+        return False
+
 
 class FakeRedis:
     def __init__(self, fail: bool = False):

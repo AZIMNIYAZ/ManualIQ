@@ -42,6 +42,8 @@ def setup_logging(level: str = "INFO") -> None:
     root = logging.getLogger()
     root.handlers = [handler]
     root.setLevel(level)
+    # qdrant-client logs every HTTP call through httpx at INFO: noise, keep warnings only
+    logging.getLogger("httpx").setLevel(logging.WARNING)
     # Our middleware logs each request, so uvicorn's own access log would be a duplicate
     logging.getLogger("uvicorn.access").handlers = []
     logging.getLogger("uvicorn.access").propagate = False
