@@ -3,6 +3,12 @@
 FastAPI backend for question answering over router user manuals, using local Qdrant for vector search,
 Redis for session memory, local `bge-small-en-v1.5` embeddings and xAI Grok for generation.
 
+## Scope: text-only
+
+The system uses the text layer of the PDFs only. Images, screenshots and diagrams are not
+processed (no OCR, no image models). Tables are included as flattened text; their structure
+is not reconstructed. Questions whose answers exist only in images are out of scope.
+
 ## Setup
 
 ```powershell

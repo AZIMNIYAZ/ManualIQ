@@ -159,6 +159,20 @@ def test_split_word_repaired():
     assert "select Enable" in page.clean_text and "protect your network" in page.clean_text
 
 
+def test_letter_split_from_common_word_repaired():
+    """'R outer’s' -> 'Router’s' because 'router' is very common in the manual and 'outer' is not."""
+    usage = " Wait until the router is ready and then open the page." * 25
+    page = clean_one(FILLER + usage + "\nSelect R outer’s PIN in Method 1.")
+    assert "Select Router’s PIN in Method 1." in page.clean_text
+
+
+def test_word_split_across_line_break_repaired():
+    usage = " Make sure the cable is connected. Make a note of the password."
+    page = clean_one(FILLER + usage + "\nMak\ne sure the router is on. Log in to\nthe router.")
+    assert "Make sure the router is on." in page.clean_text
+    assert "Log in to\nthe router." in page.clean_text  # two real words across a line break: untouched
+
+
 def test_single_trailing_letter_needs_evidence_in_manual():
     """'the e' must not become 'thee': the joined word never appears in the manual."""
     page = clean_one(FILLER + "\nSet the e mail address in the settings.")

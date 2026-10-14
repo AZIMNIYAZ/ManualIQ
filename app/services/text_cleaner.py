@@ -18,7 +18,7 @@ from functools import lru_cache
 from app.models.document import CleaningReport, Document, Page, PageNote, Repair
 
 # Bump when any rule changes, so experiments know whether collections are comparable.
-CLEANER_VERSION = "1.0"
+CLEANER_VERSION = "1.2"  # 1.1: split words joined across line breaks; 1.2: "R outer’s" -> "Router’s"
 
 # ---------------------------------------------------------------- thresholds
 MIN_WORDS = 3  # fewer words than this (raw or after cleaning): page is "empty". Short pages are kept:
@@ -37,6 +37,8 @@ REGULATORY_MIN_FAMILIES_AT_END = 2  # ...or this many in the last 10% of the man
 LEGAL_MIN_TERMS = 3  # or this many legal terms (copyright/trademark pages)
 HEADER_EDGE_LINES = 3  # header/footer lines are searched in the top/bottom 3 lines of each page
 WORD_MIN_COUNT = 3  # a fragment seen standalone this often in the manual counts as a real word
+LETTER_JOIN_MIN_COUNT = 20  # single letter + word ("R outer") is joined only if the joined word is this common...
+LETTER_JOIN_RATIO = 5  # ...and this many times more common than the second word on its own
 
 # Lines that match the header/footer rule but were manually reviewed and are real content.
 HEADER_KEEP = {
@@ -91,8 +93,11 @@ DOT_LEADER_RE = re.compile(r"(?:\.\s?){4,}\s*[\divxlc]{0,4}\s*$", re.I)
 TOC_HEADING_RE = re.compile(r"^\s*(table of\s+)?contents\b|^\s*index\s*$", re.I | re.M)
 HYPHEN_BREAK_RE = re.compile(r"([A-Za-z]{2,})-[ \t]*\n[ \t]*([a-z]{2,})")
 LETTER_SPACED_RE = re.compile(r"(?<![A-Za-z])((?:[A-Za-z] ){3,}[A-Za-z])(?![A-Za-z])")
-KERNING_RE = re.compile(r"(?<![\w.'\u2019-])([TYVWFP]) ([a-z]{2,})(?![\w'\u2019-])")
-SPLIT_PAIR_RE = re.compile(r"(?<![\w.'\u2019-])([A-Za-z]+) ([a-z]+)(?![\w'\u2019-])")
+KERNING_RE = re.compile(r"(?<![\w.'\u2019-])([TYVWFP]) ([a-z]{2,})(?![\w-])")
+SPLIT_PAIR_RE = re.compile(r"(?<![\w.'\u2019-])([A-Za-z]+) ([a-z]+)(?![\w-])")
+LINEBREAK_SPLIT_RE = re.compile(r"(?<![\w.'’-])([A-Za-z]+)\n([a-z]+)(?![\w-])")
+# (apostrophe before the first fragment blocks a join: "router’s port" must not become "sport";
+#  one after the second fragment does not: "R outer’s" -> "Router’s")
 LATIN_WORD_RE = re.compile(r"[^\W\d_]+")
 INVISIBLE_RE = re.compile("[\u00ad\u200b\u200c\u200d\ufeff]")  # soft hyphen, zero-width chars, BOM
 
@@ -100,11 +105,9 @@ INVISIBLE_RE = re.compile("[\u00ad\u200b\u200c\u200d\ufeff]")  # soft hyphen, ze
 @lru_cache
 def english_dictionary() -> frozenset[str]:
     """Whole English words from bge's tokenizer vocabulary (~21k words)."""
-    from transformers import AutoTokenizer
+    from app.services.tokenizer import get_tokenizer
 
-    from app.core.config import get_settings
-
-    vocab = AutoTokenizer.from_pretrained(get_settings().embedding_model).get_vocab()
+    vocab = get_tokenizer().get_vocab()
     return frozenset(w for w in vocab if w.isascii() and w.isalpha())
 
 
@@ -312,21 +315,39 @@ class _Repairer:
             return joined
         return KERNING_RE.sub(sub, text)
 
+    def _should_join(self, a: str, b: str) -> bool:
+        if self._is_word(a) and self._is_word(b):
+            return False  # "set up", "log in", "the router" stay as they are
+        if len(a) == 1 and self._is_word(b):
+            # "R outer" -> "Router" ("router" x356 vs "outer" x1), but "class B and class C"
+            # stays ("band" x3 vs "and" x441): join only if the joined word clearly dominates.
+            joined, rest = self.vocab[(a + b).lower()], self.vocab[b.lower()]
+            return joined >= LETTER_JOIN_MIN_COUNT and joined >= LETTER_JOIN_RATIO * rest
+        if not self._known(a + b):
+            return False
+        if len(b) == 1 and self.vocab[(a + b).lower()] < 2:
+            return False  # "the e" stays: a single trailing letter needs the joined word in this manual
+        return True
+
     def split_words(self, text: str) -> str:
         """'selec t' -> 'select': join only if a fragment is not a word and the result is known."""
         def sub(m: re.Match) -> str:
             a, b = m.group(1), m.group(2)
-            if self._is_word(a) and self._is_word(b):
-                return m.group(0)  # "set up", "log in", "the router" stay as they are
-            if len(a) == 1 and self._is_word(b):
-                return m.group(0)  # "class B and class C", "Router B and then" stay as they are
-            if not self._known(a + b):
+            if not self._should_join(a, b):
                 return m.group(0)
-            if len(b) == 1 and self.vocab[(a + b).lower()] < 2:
-                return m.group(0)  # "the e" stays: a single trailing letter needs the joined word in this manual
             self._log("split_word", m.group(0), a + b)
             return a + b
         return "\n".join(SPLIT_PAIR_RE.sub(sub, line) for line in text.split("\n"))
+
+    def split_words_across_lines(self, text: str) -> str:
+        """'Mak' at a line end + 'e sure' on the next line -> 'Make sure' (same rules as split_words)."""
+        def sub(m: re.Match) -> str:
+            a, b = m.group(1), m.group(2)
+            if not self._should_join(a, b):
+                return m.group(0)
+            self._log("split_word_linebreak", m.group(0).replace("\n", "⏎"), a + b)
+            return a + b
+        return LINEBREAK_SPLIT_RE.sub(sub, text)
 
 
 def _tidy_whitespace(text: str) -> str:
@@ -361,6 +382,7 @@ def clean_document(doc: Document, dictionary: frozenset[str] | None = None) -> t
         clean = repairer.letter_spacing(clean)
         clean = repairer.kerning(clean)
         clean = repairer.split_words(clean)
+        clean = repairer.split_words_across_lines(clean)
         clean = _tidy_whitespace(clean)
 
         if len(clean.split()) < MIN_WORDS:  # e.g. only headers/footers were left on the page

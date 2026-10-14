@@ -4,6 +4,7 @@ Run from the project root:
     python scripts/clean_report.py                     # full report for all documents
     python scripts/clean_report.py tplink_archer_ax55  # report for one document
     python scripts/clean_report.py tplink_archer_ax55 61   # raw vs clean text of one page
+    python scripts/clean_report.py --out report.txt        # save as UTF-8 (don't use '>' in PowerShell 5.1)
 
 The full report (including every repair) is also saved as JSON to
 evaluation/results/cleaning/<document_id>.json.
@@ -67,8 +68,12 @@ def print_report(report) -> None:
 
 
 def main() -> None:
-    docs = load_all_documents(get_settings().documents_dir)
     args = sys.argv[1:]
+    if "--out" in args:  # write as UTF-8 (PowerShell 5.1's '>' turns ’ into ΓÇÖ)
+        i = args.index("--out")
+        sys.stdout = open(args[i + 1], "w", encoding="utf-8")
+        del args[i:i + 2]
+    docs = load_all_documents(get_settings().documents_dir)
     if args:
         docs = [d for d in docs if d.document_id == args[0]]
         if not docs:
