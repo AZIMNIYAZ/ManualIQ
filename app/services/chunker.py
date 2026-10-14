@@ -24,7 +24,8 @@ from app.models.document import Document, Page
 from app.services.text_cleaner import CLEANER_VERSION
 from app.services.tokenizer import count_tokens, get_tokenizer
 
-MIN_FILL = 0.6  # a chunk must be this full before an earlier, better cut point is preferred
+MIN_FILL = 0.6  # a chunk must be this full before an earlier, better cut point is preferred...
+MIN_FILL_HEADING = 0.3  # ...except at a heading: a topic boundary is worth a less-full chunk
 MIN_CHUNK_TOKENS = 20  # smaller chunks (e.g. a cover page on its own) are dropped
 TAIL_MERGE_SHARE = 0.25  # a segment's last chunk with less new text than this is merged backwards
 MAX_HEADING_WORDS = 10
@@ -34,6 +35,9 @@ STEP_RE = re.compile(r"^(\d{1,2}\s?[.)](\s|$)|\d{1,2}\.(?=[A-Z])|Step\s?\d+\b|\(
 FIRST_STEP_RE = re.compile(r"^(1\s?[.)]|Step\s?1\b|\(1\)|A\.)")
 BARE_STEP_RE = re.compile(r"^(Step\s?\d+|\d{1,2}\s?[.)])$")  # "Step 3" alone on a line
 PROCEDURE_RE = re.compile(r"^To\s.{3,100}:$")  # "To set up a default DMZ server:"
+# "A.1 Factory settings", "3.6 Firewall", "10.4 Forgot my password"; needs a real word, so a
+# table row like "2.4 G 2.4 - 2.4835 GHz 100 mW" does not count
+NUMBERED_HEADING_RE = re.compile(r"^(?:[A-H]|\d{1,2})(?:\.\d{1,2}){1,3}\.?\s*[A-Z][A-Za-z]*[a-z]{2,}")
 ENDS_SENTENCE_RE = re.compile(r"[.!?:][\"'’”)\]]*$")
 CONNECTOR_END_RE = re.compile(
     r"(,|-|\b(and|or|the|a|an|to|of|for|in|on|with|from|by|your|that|is|are|be|as|at|this|if|then))$", re.I
@@ -125,7 +129,8 @@ def _build_units(pages: list[Page]) -> list[Unit]:
     for i, unit in enumerate(units):
         nxt = units[i + 1] if i + 1 < len(units) else None
         if unit.kind == "text" and _is_heading_like(unit.text) and (
-            nxt is not None and (nxt.kind in ("step", "procedure", "bullet") or nxt.ends_sentence)
+            NUMBERED_HEADING_RE.match(unit.text)  # "A.1 Factory settings": a heading even before a table
+            or (nxt is not None and (nxt.kind in ("step", "procedure", "bullet") or nxt.ends_sentence))
         ):
             unit.kind = "heading"
 
@@ -182,6 +187,12 @@ def _cut_type(units: list[Unit], k: int) -> str:
     return "sentence" if units[k - 1].ends_sentence else "mid_sentence"
 
 
+def _heading_level(text: str) -> int:
+    """'3.6 Firewall' -> 2, '3.6.1 General' -> 3; unnumbered headings rank below numbered ones."""
+    m = re.match(r"^((?:[A-H]|\d{1,2})(?:\.\d{1,2}){1,3})", text)
+    return m.group(1).count(".") + 1 if m and NUMBERED_HEADING_RE.match(text) else 9
+
+
 @dataclass
 class _Span:
     start: int  # first unit (including overlap)
@@ -213,22 +224,31 @@ def _pack(units: list[Unit], size: int, overlap: int) -> list[_Span]:
             spans.append(_Span(start, new_from, n, "segment_end"))
             break
 
-        best_k, best_cut = j, _cut_type(units, j)
-        for k in range(new_from + 1, j + 1):
-            if tokens(start, k) < MIN_FILL * size:
-                continue
+        def rank(k: int) -> tuple[int, int, int]:
+            # Best cut type first; among headings the higher level ("3.6" before "3.6.1", so a
+            # section stays with its sub-sections); then the later, fuller cut
             cut = _cut_type(units, k)
-            if CUT_PRIORITY[cut] <= CUT_PRIORITY[best_cut]:  # ties go to the later (fuller) cut
-                best_k, best_cut = k, cut
+            level = _heading_level(units[k].text) if cut == "heading" else 0
+            return CUT_PRIORITY[cut], level, -k
+
+        def fill_needed(k: int) -> float:
+            return MIN_FILL_HEADING if _cut_type(units, k) == "heading" else MIN_FILL
+
+        candidates = {k for k in range(new_from + 1, j + 1) if tokens(start, k) >= fill_needed(k) * size} | {j}
+        best_k = min(candidates, key=rank)
+        best_cut = _cut_type(units, best_k)
         # Never leave a heading or "To do X:" at the end: move it to the next chunk with its content
         while best_k - 1 > new_from and units[best_k - 1].kind in ("heading", "procedure"):
             best_k -= 1
             best_cut = _cut_type(units, best_k)
         spans.append(_Span(start, new_from, best_k, best_cut))
 
+        # Overlap keeps a procedure connected across a cut; at a new topic it would only
+        # mix the previous topic into this chunk, so none is added there.
         next_start = best_k
-        while next_start - 1 >= new_from and tokens(next_start - 1, best_k) <= overlap:
-            next_start -= 1
+        if best_cut not in ("heading", "procedure"):
+            while next_start - 1 >= new_from and tokens(next_start - 1, best_k) <= overlap:
+                next_start -= 1
         start, new_from = next_start, best_k
 
     # A tiny last chunk is merged into the previous one if the result still fits

@@ -106,6 +106,35 @@ def test_heading_and_intro_never_end_a_chunk():
     assert report.ending_with_title == 0
 
 
+def test_numbered_heading_before_a_table_is_a_cut_point():
+    """'A.1 Factory settings' is followed by table rows, not a sentence, but is still a heading."""
+    faq = "\n".join(f"- If you forgot password number {i}, reset the router and log in again." for i in range(8))
+    table = "A.1 Factory settings\nParameter Default value\nLogin\nIP address 192.168.0.1\n" + \
+            "\n".join(f"Setting {i} Value {i}" for i in range(15))
+    chunks, _ = chunk_documents([doc(page(1, faq + "\n" + table))], chunk_size=120, chunk_overlap=40)
+    table_chunk = next(c for c in chunks if "192.168.0.1" in c.text)
+    assert table_chunk.text.startswith("A.1 Factory settings")  # no FAQ lines carried over as overlap
+    assert table_chunk.section == "A.1 Factory settings"
+
+
+def test_no_overlap_across_a_topic_change():
+    d = doc(page(1, procedure("parental controls", 8) + "\n" + procedure("guest network", 8)))
+    chunks, _ = chunk_documents([d], chunk_size=100, chunk_overlap=40)
+    guest = next(c for c in chunks if c.text.startswith("Configure guest network"))
+    assert "parental controls" not in guest.text
+
+
+def test_higher_level_heading_preferred():
+    """With '3.6 Firewall' and '3.6.1 General' both available, cut before 3.6 so the section stays whole."""
+    filler = "\n".join(f"{i}. Open the time scheduling page and set rule number {i} for the client." for i in range(1, 8))
+    text = (f"3.5 Time Scheduling\nTime scheduling limits network time.\n{filler}\n"
+            "3.6 Firewall\nThe router can serve as a hardware firewall.\n"
+            "3.6.1 General\nTo set up the firewall:\n1. Go to Firewall > General.\n2. Select Yes.")
+    chunks, _ = chunk_documents([doc(page(1, text))], chunk_size=150, chunk_overlap=0)
+    firewall = next(c for c in chunks if "hardware firewall" in c.text)
+    assert firewall.text.startswith("3.6 Firewall") and "1. Go to Firewall > General." in firewall.text
+
+
 def test_oversized_unit_is_split():
     long_line = " ".join(f"Sentence number {i} describes one more router setting in detail." for i in range(60))
     d = doc(page(1, long_line))

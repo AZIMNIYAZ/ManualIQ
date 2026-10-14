@@ -13,7 +13,10 @@ from app.core.config import get_settings
 
 @lru_cache
 def get_tokenizer() -> PreTrainedTokenizerBase:
-    return AutoTokenizer.from_pretrained(get_settings().embedding_model)
+    settings = get_settings()
+    return AutoTokenizer.from_pretrained(
+        settings.embedding_model, revision=settings.embedding_model_revision, local_files_only=True
+    )
 
 
 def count_tokens(text: str) -> int:

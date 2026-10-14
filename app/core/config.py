@@ -27,8 +27,10 @@ class Settings(BaseSettings):
 
     # Embeddings
     embedding_model: str = "BAAI/bge-small-en-v1.5"
+    # Pinned model snapshot: vectors from different model versions must never be mixed
+    embedding_model_revision: str = "5c38ec7c405ec4b44b94cc5a9bb96e735b38267a"
     embedding_dim: int = BGE_SMALL_DIM
-    embedding_batch_size: int = Field(64, gt=0)
+    embedding_batch_size: int = Field(16, gt=0)  # measured fastest on CPU (16: 9.0, 32: 7.3, 64: 5.9 chunks/s)
     embedding_query_prefix: str = "Represent this sentence for searching relevant passages: "
 
     # Chunking
