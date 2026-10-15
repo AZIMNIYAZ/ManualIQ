@@ -15,7 +15,8 @@ MAX_CHUNK_TOKENS = 500  # margin below 512 for the special tokens bge adds
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    # env_ignore_empty: "LLM_PRICE_INPUT_PER_M=" (left blank) means "not set", not an invalid number
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore", env_ignore_empty=True)
 
     app_name: str = "RAG Backend"
     log_level: str = "INFO"
@@ -24,6 +25,16 @@ class Settings(BaseSettings):
     xai_api_key: str | None = None
     xai_base_url: str = "https://api.x.ai/v1"
     xai_chat_model: str | None = None
+    llm_temperature: float = Field(0.1, ge=0, le=2)  # low: consistent, factual answers
+    llm_max_output_tokens: int = Field(800, gt=0)
+    llm_timeout_seconds: float = Field(30, gt=0)
+    llm_max_retries: int = Field(2, ge=0)  # automatic retries for rate limits / network errors
+    # Optional, from xAI's pricing page (USD per million tokens); without them only tokens are reported
+    llm_price_input_per_m: float | None = Field(None, ge=0)
+    llm_price_output_per_m: float | None = Field(None, ge=0)
+
+    # Context sent to the LLM (counted with the bge tokenizer as an approximation)
+    context_max_tokens: int = Field(2500, gt=0)
 
     # Embeddings
     embedding_model: str = "BAAI/bge-small-en-v1.5"

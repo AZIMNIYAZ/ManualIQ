@@ -17,4 +17,5 @@ class HealthResponse(BaseModel):
     qdrant: ServiceStatus
     redis: ServiceStatus
     collection: CollectionInfo | None = None  # None if Qdrant is down
+    llm: Literal["configured", "not_configured"] = "not_configured"  # no API call: /chat needs it, /search does not
     details: dict[str, str] = {}

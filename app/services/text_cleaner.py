@@ -18,7 +18,7 @@ from functools import lru_cache
 from app.models.document import CleaningReport, Document, Page, PageNote, Repair
 
 # Bump when any rule changes, so experiments know whether collections are comparable.
-CLEANER_VERSION = "1.2"  # 1.1: split words joined across line breaks; 1.2: "R outer’s" -> "Router’s"
+CLEANER_VERSION = "1.3"  # 1.1: split words joined across line breaks; 1.2: "R outer’s" -> "Router’s"; 1.3: "Ye s" -> "Yes"
 
 # ---------------------------------------------------------------- thresholds
 MIN_WORDS = 3  # fewer words than this (raw or after cleaning): page is "empty". Short pages are kept:
@@ -39,6 +39,8 @@ HEADER_EDGE_LINES = 3  # header/footer lines are searched in the top/bottom 3 li
 WORD_MIN_COUNT = 3  # a fragment seen standalone this often in the manual counts as a real word
 LETTER_JOIN_MIN_COUNT = 20  # single letter + word ("R outer") is joined only if the joined word is this common...
 LETTER_JOIN_RATIO = 5  # ...and this many times more common than the second word on its own
+CONSISTENT_SPLIT_MIN_COUNT = 3  # "Ye s" is joined if the pair repeats at least this often...
+CONSISTENT_SPLIT_SHARE = 0.5  # ...and at least half of all "ye" occurrences are inside the pair
 
 # Lines that match the header/footer rule but were manually reviewed and are real content.
 HEADER_KEEP = {
@@ -255,6 +257,11 @@ class _Repairer:
     def __init__(self, raw_texts: list[str], dictionary: frozenset[str]):
         self.dictionary = dictionary
         self.vocab = Counter(w.lower() for t in raw_texts for w in re.findall(r"[A-Za-z]+", t))
+        # How often each "word fragment" pair occurs on one line, e.g. ("ye", "s")
+        self.pairs = Counter(
+            (m.group(1).lower(), m.group(2).lower())
+            for t in raw_texts for line in t.splitlines() for m in SPLIT_PAIR_RE.finditer(line)
+        )
         self.repairs: list[Repair] = []
         self.page = 0
 
@@ -315,6 +322,13 @@ class _Repairer:
             return joined
         return KERNING_RE.sub(sub, text)
 
+    def _consistent_split(self, a: str, b: str) -> bool:
+        """The pair repeats and the first part almost only appears inside it: 'ye' occurs 22 times,
+        all as 'Ye s'; 'the' occurs thousands of times and 'the e' once."""
+        pair = self.pairs[(a.lower(), b.lower())]
+        return (pair >= CONSISTENT_SPLIT_MIN_COUNT and pair >= CONSISTENT_SPLIT_SHARE * self.vocab[a.lower()]
+                and (a + b).lower() in self.dictionary)
+
     def _should_join(self, a: str, b: str) -> bool:
         if self._is_word(a) and self._is_word(b):
             return False  # "set up", "log in", "the router" stay as they are
@@ -325,8 +339,10 @@ class _Repairer:
             return joined >= LETTER_JOIN_MIN_COUNT and joined >= LETTER_JOIN_RATIO * rest
         if not self._known(a + b):
             return False
-        if len(b) == 1 and self.vocab[(a + b).lower()] < 2:
-            return False  # "the e" stays: a single trailing letter needs the joined word in this manual
+        if len(b) == 1 and self.vocab[(a + b).lower()] < 2 and not self._consistent_split(a, b):
+            # "the e" stays: a single trailing letter needs the joined word in this manual, or a split
+            # that repeats consistently ("Ye s" x22 in ASUS, where "Yes" is almost never unsplit)
+            return False
         return True
 
     def split_words(self, text: str) -> str:

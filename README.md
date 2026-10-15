@@ -43,7 +43,30 @@ collection can only hold chunks of its own configuration. Re-running ingestion i
 point IDs come from chunk IDs (overwrite, never duplicate), and points from older runs are
 deleted only after the new run is fully written and its count verified.
 
-Known limitations (fine for this single-user project):
+## Asking questions
+
+```powershell
+python scripts/llm_check.py                 # free: checks XAI_CHAT_MODEL is available to your key
+python scripts/chat_check.py --out chat_check.txt         # 2 live questions (costs a few cents)
+python scripts/chat_check.py --all --out chat_check.txt   # all 12
+```
+
+`POST /api/v1/chat` answers from the manuals with cited sources; `debug: true` returns the
+exact context sent to the LLM, which is what grounding must be judged against.
+
+## Open items for evaluation (Steps 11-12)
+
+- **Tables:** the Tenda factory-settings table is not retrieved for "default login IP"
+  (flattened tables embed poorly). Test contextual headers and hybrid keyword search.
+- **Context confusion:** chunks holding several variants of a procedure (D-Link Quick VPN
+  for iOS/Android/Mac/Windows, Netgear OpenVPN Windows/Mac, Tenda blacklist add/remove).
+  Compare prompt 1.1 with a "procedure isolation" rule (1.2); run each question 2-3 times,
+  since answers vary between runs.
+- **Prompt and model:** non-reasoning vs reasoning Grok models (latency and cost).
+
+## Known limitations
+
+Fine for this single-user project:
 - If a write fails part-way, the collection is reported as `mixed` and ingestion must be
   re-run. Production fix: build a new collection and switch a Qdrant alias atomically.
 - The "one ingestion at a time" lock is per process: it covers the API with one worker,

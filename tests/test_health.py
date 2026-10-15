@@ -20,7 +20,10 @@ services_running = pytest.mark.skipif(
 def test_all_ok(make_client):
     r = make_client().get("/health")
     assert r.status_code == 200
-    assert r.json() == {
+    body = r.json()
+    assert body["llm"] in ("configured", "not_configured")  # depends on your .env; never fails health
+    del body["llm"]
+    assert body == {
         "status": "ok", "api": "ok", "qdrant": "ok", "redis": "ok",
         "collection": {"name": "rag_350_60", "exists": False, "points": None},  # not ingested: still 200
         "details": {},

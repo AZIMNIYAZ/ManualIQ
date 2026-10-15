@@ -54,6 +54,7 @@ def health(
         qdrant=qdrant_status,
         redis=redis_status,
         collection=collection,
+        llm="configured" if settings.xai_api_key and settings.xai_chat_model else "not_configured",
         details=details,
     )
     if details:

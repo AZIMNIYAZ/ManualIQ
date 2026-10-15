@@ -249,6 +249,118 @@
           }
         }
       ]
+    },
+    {
+      "name": "Chat - cited answer",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"message\": \"How do I set up port forwarding on the Netgear router?\"\n}"
+        },
+        "url": "{{base_url}}/api/v1/chat"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+              "pm.test('Answer found and cited', () => {",
+              "  const body = pm.response.json();",
+              "  pm.expect(body.found_in_documents).to.be.true;",
+              "  pm.expect(body.sources.length).to.be.above(0);",
+              "  pm.expect(body.answer).to.match(/\\[\\d+\\]/);",
+              "});",
+              "pm.test('No grounding warnings', () => pm.expect(pm.response.json().warnings).to.eql([]));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Chat - debug (shows the context sent to the LLM)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"message\": \"How do I enable the firewall on the ASUS router?\",\n  \"debug\": true\n}"
+        },
+        "url": "{{base_url}}/api/v1/chat"
+      }
+    },
+    {
+      "name": "Chat - grounding test: Tenda default IP (expect not found)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"message\": \"What is the default login IP address of the Tenda router?\"\n}"
+        },
+        "url": "{{base_url}}/api/v1/chat"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Refuses instead of answering from general knowledge', () => {",
+              "  const body = pm.response.json();",
+              "  pm.expect(body.found_in_documents).to.be.false;",
+              "  pm.expect(body.sources).to.eql([]);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Chat - out of scope (expect not found)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"message\": \"What is the weather forecast for tomorrow?\"\n}"
+        },
+        "url": "{{base_url}}/api/v1/chat"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Not found', () => pm.expect(pm.response.json().found_in_documents).to.be.false);"
+            ]
+          }
+        }
+      ]
     }
   ]
 }

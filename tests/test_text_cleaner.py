@@ -173,6 +173,13 @@ def test_word_split_across_line_break_repaired():
     assert "Log in to\nthe router." in page.clean_text  # two real words across a line break: untouched
 
 
+def test_consistently_split_word_repaired_even_if_never_unsplit():
+    """ASUS: 'Yes' is split as 'Ye s' 22 times and almost never appears whole."""
+    lines = "\n".join(f"On the option {i} field, select Ye s to enable it." for i in range(5))
+    page = clean_one(FILLER + "\n" + lines)
+    assert "select Yes to enable it." in page.clean_text and "Ye s" not in page.clean_text
+
+
 def test_single_trailing_letter_needs_evidence_in_manual():
     """'the e' must not become 'thee': the joined word never appears in the manual."""
     page = clean_one(FILLER + "\nSet the e mail address in the settings.")
