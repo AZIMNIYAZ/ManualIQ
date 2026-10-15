@@ -32,7 +32,7 @@ class SearchRequest(BaseModel):
 
 class SearchFilters(BaseModel):
     brands: list[str]  # empty = all brands
-    brand_source: Literal["request", "detected", "none"]
+    brand_source: Literal["request", "rewrite", "detected", "none"]
     include_regulatory: bool
 
 

@@ -142,7 +142,10 @@ from app.api.search import get_aliases  # noqa: E402
 from app.database.qdrant import get_qdrant  # noqa: E402
 from app.services.embedding_service import get_embedder  # noqa: E402
 
-OTHER_DEPENDENCIES = {get_qdrant: lambda: None, get_embedder: lambda: None, get_aliases: lambda: ()}
+from app.services.session_service import get_session_store  # noqa: E402
+
+OTHER_DEPENDENCIES = {get_qdrant: lambda: None, get_embedder: lambda: None, get_aliases: lambda: (),
+                      get_session_store: lambda: None, gen.get_rewriter: lambda: None}
 
 @pytest.mark.parametrize("error, status", [
     (gen.LLMAuthenticationError("auth"), 502), (gen.LLMRateLimited("slow down"), 429),

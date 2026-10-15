@@ -59,12 +59,14 @@ class GenerationService(Protocol):
 
 
 class GrokGenerationService:
-    def __init__(self, settings: Settings):
-        if not settings.xai_api_key or not settings.xai_chat_model:
+    def __init__(self, settings: Settings, model: str | None = None, temperature: float | None = None,
+                 max_output_tokens: int | None = None):
+        """Defaults to the answer model and settings; the query rewriter passes its own."""
+        if not settings.xai_api_key or not (model or settings.xai_chat_model):
             raise GenerationNotConfigured("Generation not configured: set XAI_API_KEY and XAI_CHAT_MODEL in .env")
-        self.model = settings.xai_chat_model
-        self.temperature = settings.llm_temperature
-        self.max_output_tokens = settings.llm_max_output_tokens
+        self.model = model or settings.xai_chat_model
+        self.temperature = settings.llm_temperature if temperature is None else temperature
+        self.max_output_tokens = max_output_tokens or settings.llm_max_output_tokens
         self.client = openai.OpenAI(
             api_key=settings.xai_api_key,
             base_url=settings.xai_base_url,
@@ -115,6 +117,18 @@ def create_generator(settings: Settings) -> GenerationService | None:
         logger.warning("Generation not configured (XAI_API_KEY / XAI_CHAT_MODEL missing): /chat will return 503")
         return None
     return GrokGenerationService(settings)
+
+
+def create_rewriter(settings: Settings) -> GenerationService | None:
+    """The model used to rewrite follow-up questions (fast, deterministic, short output)."""
+    if not settings.xai_api_key or not (settings.xai_rewrite_model or settings.xai_chat_model):
+        return None
+    return GrokGenerationService(settings, model=settings.xai_rewrite_model or settings.xai_chat_model,
+                                 temperature=0.0, max_output_tokens=settings.rewrite_max_output_tokens)
+
+
+def get_rewriter(request: Request) -> GenerationService | None:
+    return getattr(request.app.state, "rewriter", None)
 
 
 def get_generator(request: Request) -> GenerationService:

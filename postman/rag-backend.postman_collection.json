@@ -12,6 +12,10 @@
     {
       "key": "collection",
       "value": "rag_350_60"
+    },
+    {
+      "key": "session_id",
+      "value": ""
     }
   ],
   "item": [
@@ -357,6 +361,127 @@
             "type": "text/javascript",
             "exec": [
               "pm.test('Not found', () => pm.expect(pm.response.json().found_in_documents).to.be.false);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Conversation 1/2 - new session (Netgear)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/chat",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"message\": \"How do I set up port forwarding on my Netgear router?\"\n}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+              "const body = pm.response.json();",
+              "pm.collectionVariables.set('session_id', body.session_id);  // used by the next requests",
+              "pm.test('New session, no rewrite', () => { pm.expect(body.history_used).to.eql(0); pm.expect(body.rewritten_query).to.be.null; });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Conversation 2/2 - follow-up 'What about on ASUS?'",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/chat",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"message\": \"What about on ASUS?\",\n  \"session_id\": \"{{session_id}}\"\n}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+              "pm.test('Rewritten to a standalone ASUS question', () => {",
+              "  const body = pm.response.json();",
+              "  pm.expect(body.history_used).to.eql(2);",
+              "  pm.expect(body.rewritten_query.toLowerCase()).to.include('asus');",
+              "  pm.expect(body.filters.brands).to.eql(['asus']);",
+              "  pm.expect(body.filters.brand_source).to.eql('rewrite');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Session - get history",
+      "request": {
+        "method": "GET",
+        "url": "{{base_url}}/api/v1/sessions/{{session_id}}"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+              "pm.test('Two turns stored', () => pm.expect(pm.response.json().messages.length).to.eql(4));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Session - delete",
+      "request": {
+        "method": "DELETE",
+        "url": "{{base_url}}/api/v1/sessions/{{session_id}}"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Deleted (204)', () => pm.response.to.have.status(204));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Session - get after delete (expect 404)",
+      "request": {
+        "method": "GET",
+        "url": "{{base_url}}/api/v1/sessions/{{session_id}}"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Gone (404)', () => pm.response.to.have.status(404));"
             ]
           }
         }

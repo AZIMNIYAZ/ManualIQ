@@ -71,3 +71,20 @@ Fine for this single-user project:
   re-run. Production fix: build a new collection and switch a Qdrant alias atomically.
 - The "one ingestion at a time" lock is per process: it covers the API with one worker,
   not the API and `scripts/ingest.py` running at the same moment.
+- Two simultaneous `/chat` requests on the same session could interleave their turns in
+  the history (each turn itself is written atomically). One user in one chat does not
+  send overlapping requests, so no per-session lock is used.
+
+## Conversations
+
+Send the `session_id` returned by `/chat` with the next message. Follow-ups are rewritten
+into standalone questions by a fast model (`XAI_REWRITE_MODEL`) using the last
+`HISTORY_MESSAGES_IN_PROMPT` messages; previous answers are never sent to the answer
+model. Brand precedence: the request's `brand` field (per request, never stored) >
+brands from the rewrite > brands detected in the question. Without Redis, `/chat` still
+answers (warning `history_unavailable`). `GET`/`DELETE /api/v1/sessions/{id}` show or
+remove a conversation; sessions expire 24 h after the last message.
+
+```powershell
+python scripts/conversation_check.py --out conversation_check.txt   # 5 scripted conversations (live)
+```

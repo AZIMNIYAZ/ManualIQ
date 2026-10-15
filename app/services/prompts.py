@@ -18,5 +18,10 @@ Rules:
 7. Answer only the question asked. If the sources also describe related procedures, mention them in one line at most instead of explaining them."""
 
 
-def user_message(context: str, question: str) -> str:
-    return f"Sources:\n\n{context}\n\nQuestion: {question}"
+def user_message(context: str, question: str, original: str | None = None) -> str:
+    """`question` is standalone (rewritten for follow-ups); the original wording is shown too,
+    so the reply fits what the user typed. Previous answers are never included."""
+    text = f"Sources:\n\n{context}\n\nQuestion: {question}"
+    if original and original != question:
+        text += f"\n(The user's original wording, as a follow-up in a conversation: {original})"
+    return text

@@ -53,6 +53,7 @@ def search(
     request: SearchRequest,
     aliases: AliasTable,
     detect_brand: bool = True,
+    brand_source: str = "request",  # label for request.brand: "rewrite" when it came from query rewriting
 ) -> SearchResponse:
     started = time.perf_counter()
     name = settings.collection_name
@@ -74,7 +75,7 @@ def search(
         unknown = [b for b in request.brand if b not in valid_brands]
         if unknown:
             raise InvalidBrand(f"Unknown brand {unknown}; valid brands: {sorted(valid_brands)}")
-        brands, source = request.brand, "request"
+        brands, source = request.brand, brand_source
     else:
         detected = [b for b in detect_brands(request.query, aliases) if b in valid_brands] if detect_brand else []
         brands, source = detected, ("detected" if detected else "none")

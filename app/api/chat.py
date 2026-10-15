@@ -8,7 +8,8 @@ from app.models.chat import ChatRequest, ChatResponse
 from app.services.brand_detection import AliasTable
 from app.services.chat_service import answer
 from app.services.embedding_service import EmbeddingService, get_embedder
-from app.services.generation_service import GenerationService, get_generator
+from app.services.generation_service import GenerationService, get_generator, get_rewriter
+from app.services.session_service import SessionStore, get_session_store
 
 router = APIRouter(prefix="/api/v1", tags=["chat"])
 
@@ -32,6 +33,12 @@ def chat(
     generator: GenerationService = Depends(get_generator),
     settings: Settings = Depends(get_settings),
     aliases: AliasTable = Depends(get_aliases),
+    sessions: SessionStore = Depends(get_session_store),
+    rewriter: GenerationService | None = Depends(get_rewriter),
 ):
-    """Answers a question from the manuals with cited sources (one-shot: no conversation memory yet)."""
-    return answer(qdrant, embedder, generator, settings, request, aliases)
+    """Answers a question from the manuals with cited sources.
+
+    Send the returned session_id with the next message to continue the conversation:
+    follow-ups ("What about on ASUS?") are rewritten into standalone questions.
+    """
+    return answer(qdrant, embedder, generator, settings, request, aliases, sessions, rewriter)

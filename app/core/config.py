@@ -29,6 +29,11 @@ class Settings(BaseSettings):
     llm_max_output_tokens: int = Field(800, gt=0)
     llm_timeout_seconds: float = Field(30, gt=0)
     llm_max_retries: int = Field(2, ge=0)  # automatic retries for rate limits / network errors
+    # Query rewriting for follow-up questions: a small task, so a fast non-reasoning model
+    # (measured 1.0 s vs 5.1 s for grok-4.3); defaults to XAI_CHAT_MODEL if not set
+    xai_rewrite_model: str | None = None
+    rewrite_max_output_tokens: int = Field(200, gt=0)
+    rewrite_answer_chars: int = Field(300, gt=0)  # previous answers are shortened for the rewriter
     # Optional, from xAI's pricing page (USD per million tokens); without them only tokens are reported
     llm_price_input_per_m: float | None = Field(None, ge=0)
     llm_price_output_per_m: float | None = Field(None, ge=0)
@@ -61,6 +66,7 @@ class Settings(BaseSettings):
     redis_host: str = "127.0.0.1"
     redis_port: int = 6379
     redis_timeout_seconds: float = Field(2.0, gt=0)
+    session_key_prefix: str = Field("session", pattern=r"^[a-z_]+$")  # tests use another prefix
     session_ttl_seconds: int = Field(86400, gt=0)
     session_max_stored_messages: int = Field(50, gt=0)
     history_messages_in_prompt: int = Field(8, ge=0)
