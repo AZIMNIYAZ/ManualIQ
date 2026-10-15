@@ -20,6 +20,12 @@ class Settings(BaseSettings):
 
     app_name: str = "RAG Backend"
     log_level: str = "INFO"
+    # JSON-lines log file for analysis (scripts/log_report.py); "none" or unset = console only.
+    # Only the API process writes it (Windows cannot rotate a file another process has open).
+    log_file: str | None = None
+    # Privacy: questions and answers are logged as lengths unless this is enabled
+    log_user_text: bool = False
+    slow_request_ms: float = Field(15000, gt=0)  # requests slower than this are logged as warnings
 
     # xAI / Grok: optional until generation is built (Step 8)
     xai_api_key: str | None = None

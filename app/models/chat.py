@@ -27,13 +27,16 @@ class ChatRequest(BaseModel):
 
 
 class ChatSource(BaseModel):
-    n: int  # the [n] used in the answer
+    n: int  # the first [n] that cites this source
+    refs: list[int]  # every [n] in the answer that points to this source (merged duplicates)
     citation: str
+    document_id: str
     brand: str
     model: str
     section: str | None
-    chunk_id: str
+    chunk_id: str  # the first cited chunk of this source
     score: float
+    excerpt: str  # start of the cited text, to check a citation without debug mode
 
 
 class LlmInfo(BaseModel):

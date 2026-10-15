@@ -257,4 +257,4 @@ def test_api_maps_errors_to_status_codes(monkeypatch, error, status):
         r = TestClient(app).post("/api/v1/ingest", json={"recreate": False})
     finally:
         app.dependency_overrides.clear()
-    assert r.status_code == status and r.json()["status"] == "failed"
+    assert r.status_code == status and r.json()["error"]["code"] == error.code

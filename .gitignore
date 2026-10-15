@@ -19,3 +19,6 @@ documents/*.pdf
 # Evaluation outputs
 evaluation/results/*
 !evaluation/results/.gitkeep
+
+# Logs (incl. rotated files app.jsonl.1, .2, ...)
+logs/

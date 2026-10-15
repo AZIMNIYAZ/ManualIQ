@@ -29,14 +29,46 @@ from app.services.generation_service import GenerationService
 from app.services.prompts import NOT_FOUND_ANSWER, PROMPT_VERSION, SYSTEM_PROMPT, user_message
 from app.services.query_rewriter import REWRITE_PROMPT_VERSION, RewriteResult, rewrite
 from app.services.session_service import SessionStore, SessionUnavailable
+from app.services.text_cleaner import CLEANER_VERSION
 
 logger = logging.getLogger(__name__)
 
 
+EXCERPT_CHARS = 200
+
+
+def _excerpt(text: str) -> str:
+    flat = " ".join(text.split())
+    return flat if len(flat) <= EXCERPT_CHARS else flat[:EXCERPT_CHARS].rstrip() + "…"
+
+
 def _source(s: ContextSource) -> ChatSource:
     r = s.result
-    return ChatSource(n=s.n, citation=r.citation, brand=r.brand, model=r.model, section=r.section,
-                      chunk_id=r.chunk_id, score=r.score)
+    return ChatSource(n=s.n, refs=[s.n], citation=r.citation, document_id=r.document_id, brand=r.brand,
+                      model=r.model, section=r.section, chunk_id=r.chunk_id, score=r.score, excerpt=_excerpt(r.text))
+
+
+def cited_sources(cited: list[int], context_sources: list[ContextSource]) -> list[ChatSource]:
+    """One entry per source, in order of first citation. Chunks of the same manual and page
+    range are merged (all their [n] kept); the document is part of the identity, so two
+    manuals with the same page numbers are never merged."""
+    by_n = {s.n: s for s in context_sources}
+    merged: dict[tuple, ChatSource] = {}
+    for n in cited:  # already in order of first use
+        r = by_n[n].result
+        key = (r.document_id, r.page_start, r.page_end)
+        if key in merged:
+            merged[key].refs.append(n)
+        else:
+            merged[key] = _source(by_n[n])
+    return list(merged.values())
+
+
+def _text(value: str | None, settings: Settings):
+    """Privacy: user text is logged only if LOG_USER_TEXT is enabled; otherwise its length."""
+    if value is None or settings.log_user_text:
+        return value
+    return {"chars": len(value)}
 
 
 def _ms(since: float) -> float:
@@ -94,7 +126,7 @@ def answer(
 
     t = time.perf_counter()
     found = retrieval_service.search(client, embedder, settings, request.to_search(query, brand), aliases,
-                                     brand_source=brand_source)
+                                     brand_source=brand_source, log_event=False)
     search_ms = _ms(t)
     rewritten_query = query if rewritten and rewritten.rewritten else None
     rewrite_info = (RewriteInfo(model=rewritten.model, prompt_version=REWRITE_PROMPT_VERSION,
@@ -119,7 +151,7 @@ def answer(
             session_id=session_id,
             answer=generated.answer,
             found_in_documents=not check.not_found,
-            sources=[_source(by_n[n]) for n in check.cited],
+            sources=cited_sources(check.cited, context.sources),
             filters=found.filters,
             warnings=warnings + check.warnings,
             llm=LlmInfo(
@@ -150,10 +182,33 @@ def answer(
             response.warnings.append({"type": "history_not_saved", "detail": str(e)})
 
     response.timings_ms["total"] = _ms(started)
-    logger.info("chat", extra={"fields": {
-        "session_id": session_id, "message": request.message, "rewritten_query": rewritten_query,
-        "history_used": len(history), "brands": response.filters.brands,
-        "brand_source": response.filters.brand_source, "found": response.found_in_documents,
-        "cited": [s.chunk_id for s in response.sources], "warnings": [w["type"] for w in response.warnings],
-        "llm": response.llm.model_dump(), "timings_ms": response.timings_ms}})
+    # One complete record per chat request (scripts/log_report.py reads these)
+    logger.info("chat_completed", extra={"fields": {
+        "endpoint": "chat",
+        "session_id": session_id,
+        "user_message": _text(request.message, settings),
+        "rewritten_query": _text(rewritten_query, settings),
+        "answer": {"chars": len(response.answer)},  # answers are never logged in full
+        "history_used": len(history),
+        "brands": response.filters.brands, "brand_source": response.filters.brand_source,
+        "retrieved": [[r.chunk_id, r.score] for r in found.results],
+        "cited": [s.chunk_id for s in response.sources],
+        "found_in_documents": response.found_in_documents,
+        "warnings": [w["type"] for w in response.warnings],
+        "tokens": {
+            "rewrite_in": rewrite_info.input_tokens if rewrite_info else 0,
+            "rewrite_out": rewrite_info.output_tokens if rewrite_info else 0,
+            "answer_in": response.llm.input_tokens, "answer_out": response.llm.output_tokens,
+            "reasoning": response.llm.reasoning_tokens,
+        },
+        "timings_ms": {
+            "rewrite": response.timings_ms["rewrite"],
+            "checks": found.timings_ms.get("checks"), "embed": found.timings_ms.get("embed"),
+            "vector_search": found.timings_ms.get("search"),
+            "generate": response.timings_ms["generate"], "total": response.timings_ms["total"],
+        },
+        "models": {"answer": response.llm.model, "rewrite": rewrite_info.model if rewrite_info else None},
+        "versions": {"prompt": PROMPT_VERSION, "rewrite_prompt": REWRITE_PROMPT_VERSION,
+                     "cleaner": CLEANER_VERSION, "chunking": settings.chunking},
+    }})
     return response

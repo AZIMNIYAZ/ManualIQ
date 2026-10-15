@@ -137,7 +137,7 @@ def test_redis_down_is_session_unavailable():
 def fake_search(monkeypatch):
     calls = []
 
-    def search(client, embedder, settings, request, aliases, detect_brand=True, brand_source="request"):
+    def search(client, embedder, settings, request, aliases, detect_brand=True, brand_source="request", **kwargs):
         calls.append((request, brand_source))
         brands = request.brand or []
         return SearchResponse(query=request.query, collection="rag_350_60", query_tokens=20, query_truncated=False,

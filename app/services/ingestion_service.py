@@ -25,6 +25,7 @@ from datetime import datetime, timezone
 from qdrant_client import QdrantClient
 from qdrant_client.models import FilterSelector, Filter, PointStruct
 
+from app.core.errors import AppError
 from app.core.config import Settings
 from app.database.qdrant import CollectionMismatch, check_compatible, count, create_collection, field_equals
 from app.models.chunk import Chunk
@@ -42,28 +43,42 @@ POINT_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_DNS, "rag-proj.local/chunks")
 _lock = threading.Lock()
 
 
-class IngestionError(Exception):
+class IngestionError(AppError):
     status_code = 500
+    code = "ingestion_failed"
 
 
 class IngestionInProgress(IngestionError):
     status_code = 409
+    code = "ingestion_in_progress"
+    retry_after = 30
 
 
 class ConfirmationRequired(IngestionError):
     status_code = 400
+    code = "confirmation_required"
 
 
 class DocumentsInvalid(IngestionError):
     status_code = 422
+    code = "documents_invalid"
 
 
 class IncompatibleCollection(IngestionError):
     status_code = 409
+    code = "incompatible_collection"
 
 
 class QdrantUnavailable(IngestionError):
     status_code = 503
+    code = "vector_db_unavailable"
+    retry_after = 5
+
+
+class IngestionWriteFailed(IngestionError):
+    """Writing failed part-way; details holds the report (collection_state says what is left)."""
+    status_code = 500
+    code = "ingestion_write_failed"
 
 
 def point_id(chunk_id: str) -> str:
@@ -195,6 +210,6 @@ def _ingest(client, embedder, settings: Settings, recreate: bool, confirm: str |
 
     report.status, report.collection_state = "success", "updated"
     report.timings_s = {**timings, "total": round(time.perf_counter() - started, 2)}
-    logger.info("Ingestion complete", extra={"fields": report.model_dump(include={
-        "collection", "chunks_indexed", "stale_points_deleted", "timings_s"})})
+    logger.info("ingest_completed", extra={"fields": {"endpoint": "ingest", **report.model_dump(include={
+        "collection", "chunks_indexed", "stale_points_deleted", "versions", "timings_s"})}})
     return report

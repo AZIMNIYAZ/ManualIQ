@@ -17,7 +17,8 @@ from app.services.prompts import NOT_FOUND_ANSWER, SYSTEM_PROMPT  # noqa: E402
 
 
 def result(rank, text, brand="netgear", model="Nighthawk RAX50", pages=(139, 139), section="Port forwarding"):
-    return SearchResult(rank=rank, score=round(0.9 - rank / 100, 3), chunk_id=f"{brand}_{rank:04d}", brand=brand,
+    return SearchResult(rank=rank, score=round(0.9 - rank / 100, 3), chunk_id=f"{brand}_{rank:04d}",
+                        document_id=f"{brand}_doc", brand=brand,
                         model=model, source=f"{brand}.pdf", page_start=pages[0], page_end=pages[1],
                         citation=f"{brand}.pdf, p. {pages[0]}", section=section, content_type="normal", text=text)
 
@@ -159,7 +160,9 @@ def test_api_maps_llm_errors(fake_search, error, status):
         r = TestClient(app).post("/api/v1/chat", json={"message": "port forwarding"})
     finally:
         app.dependency_overrides.clear()
-    assert r.status_code == status and r.json() == {"error": str(error)}
+    body = r.json()["error"]
+    assert r.status_code == status and body["code"] == error.code and body["message"] == str(error)
+    assert body["request_id"] == r.headers["X-Request-ID"] and body["details"] is None
 
 
 def test_api_without_llm_configured_is_503():
@@ -170,10 +173,28 @@ def test_api_without_llm_configured_is_503():
         r = TestClient(app).post("/api/v1/chat", json={"message": "port forwarding"})
     finally:
         app.dependency_overrides.clear()
-    assert r.status_code == 503 and "XAI_API_KEY" in r.json()["error"]
+    assert r.status_code == 503 and r.json()["error"]["code"] == "generation_not_configured"
+    assert "XAI_API_KEY" in r.json()["error"]["message"] and "Retry-After" not in r.headers
 
 
 def test_generator_not_created_without_key():
     assert gen.create_generator(Settings(_env_file=None)) is None
     with pytest.raises(gen.GenerationNotConfigured):
         gen.GrokGenerationService(Settings(_env_file=None))
+
+
+def test_xai_invalid_key_400_is_an_authentication_error(monkeypatch):
+    """xAI answers an invalid key with HTTP 400 'Incorrect API key provided' (seen in the failure drills)."""
+    import httpx
+    import openai
+
+    service = gen.GrokGenerationService(Settings(_env_file=None, xai_api_key="xai-" + "0" * 40, xai_chat_model="m"))
+    request = httpx.Request("POST", "https://api.x.ai/v1/chat/completions")
+
+    def bad_request(**kwargs):
+        raise openai.BadRequestError("Incorrect API key provided.", response=httpx.Response(400, request=request),
+                                     body=None)
+
+    monkeypatch.setattr(service.client.chat.completions, "create", bad_request)
+    with pytest.raises(gen.LLMAuthenticationError):
+        service.generate("system", "user")

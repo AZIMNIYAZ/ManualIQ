@@ -9,6 +9,7 @@ import time
 from qdrant_client import QdrantClient
 from qdrant_client.models import FieldCondition, Filter, MatchAny
 
+from app.core.errors import AppError
 from app.core.config import Settings
 from app.database.qdrant import count, field_equals
 from app.models.search import SearchFilters, SearchRequest, SearchResponse, SearchResult
@@ -18,20 +19,25 @@ from app.services.embedding_service import EmbeddingService
 logger = logging.getLogger(__name__)
 
 
-class SearchError(Exception):
+class SearchError(AppError):
     status_code = 500
+    code = "search_error"
 
 
 class KnowledgeBaseEmpty(SearchError):
     status_code = 409
+    code = "knowledge_base_empty"
 
 
 class InvalidBrand(SearchError):
     status_code = 422
+    code = "invalid_brand"
 
 
 class VectorDatabaseUnavailable(SearchError):
     status_code = 503
+    code = "vector_db_unavailable"
+    retry_after = 5
 
 
 def citation(source: str, page_start: int, page_end: int) -> str:
@@ -54,6 +60,7 @@ def search(
     aliases: AliasTable,
     detect_brand: bool = True,
     brand_source: str = "request",  # label for request.brand: "rewrite" when it came from query rewriting
+    log_event: bool = True,  # False when /chat calls search (chat_completed already covers it)
 ) -> SearchResponse:
     started = time.perf_counter()
     name = settings.collection_name
@@ -102,6 +109,7 @@ def search(
             rank=i,
             score=round(p.score, 4),
             chunk_id=p.payload["chunk_id"],
+            document_id=p.payload["document_id"],
             brand=p.payload["brand"],
             model=p.payload["model"],
             source=p.payload["source"],
@@ -128,8 +136,11 @@ def search(
             "total": round((time.perf_counter() - started) * 1000, 1),
         },
     )
-    logger.info("search", extra={"fields": {
-        "query": request.query, "brands": brands, "brand_source": source,
-        "include_regulatory": request.include_regulatory, "top_k": top_k,
-        "results": [(r.chunk_id, r.score) for r in results], "timings_ms": response.timings_ms}})
+    if log_event:
+        logger.info("search_completed", extra={"fields": {
+            "endpoint": "search",
+            "query": request.query if settings.log_user_text else {"chars": len(request.query)},
+            "brands": brands, "brand_source": source,
+            "include_regulatory": request.include_regulatory, "top_k": top_k,
+            "results": [(r.chunk_id, r.score) for r in results], "timings_ms": response.timings_ms}})
     return response

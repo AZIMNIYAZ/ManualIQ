@@ -15,16 +15,20 @@ from fastapi import Request
 from redis import Redis
 from redis.exceptions import RedisError
 
+from app.core.errors import AppError
 from app.core.config import Settings
 from app.models.session import StoredMessage
 
 
-class SessionUnavailable(Exception):
+class SessionUnavailable(AppError):
     status_code = 503
+    code = "session_store_unavailable"
+    retry_after = 5
 
 
-class SessionNotFound(Exception):
+class SessionNotFound(AppError):
     status_code = 404
+    code = "session_not_found"
 
 
 class SessionStore:

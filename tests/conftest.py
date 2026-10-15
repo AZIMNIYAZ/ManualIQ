@@ -1,4 +1,8 @@
-import pytest
+import os
+
+os.environ["LOG_FILE"] = "none"  # tests never write to the real logs/app.jsonl
+
+import pytest  # noqa: E402
 from fastapi.testclient import TestClient
 
 from app.database.qdrant import get_qdrant

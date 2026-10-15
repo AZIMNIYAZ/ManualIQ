@@ -12,33 +12,41 @@ from typing import Protocol
 import openai
 from fastapi import Request
 
+from app.core.errors import AppError
 from app.core.config import Settings
 
 logger = logging.getLogger(__name__)
 
 
-class GenerationError(Exception):
+class GenerationError(AppError):
     status_code = 502
+    code = "llm_error"
 
 
 class GenerationNotConfigured(GenerationError):
     status_code = 503
+    code = "generation_not_configured"
 
 
 class LLMAuthenticationError(GenerationError):
     status_code = 502
+    code = "llm_authentication_failed"
 
 
 class LLMRateLimited(GenerationError):
     status_code = 429
+    code = "llm_rate_limited"
+    retry_after = 10
 
 
 class LLMTimeout(GenerationError):
     status_code = 504
+    code = "llm_timeout"
 
 
 class LLMUnavailable(GenerationError):
     status_code = 502
+    code = "llm_unavailable"
 
 
 @dataclass(frozen=True)
@@ -85,8 +93,15 @@ class GrokGenerationService:
             )
         except openai.AuthenticationError as e:
             raise LLMAuthenticationError("LLM authentication failed: check XAI_API_KEY") from e
+        except (openai.BadRequestError, openai.PermissionDeniedError) as e:
+            # xAI rejects an invalid key with HTTP 400 "Incorrect API key provided", not 401
+            if "api key" in str(e).lower():
+                raise LLMAuthenticationError("LLM authentication failed: check XAI_API_KEY") from e
+            raise LLMUnavailable(f"LLM API error {e.status_code}: {e.message}") from e
         except openai.RateLimitError as e:
-            raise LLMRateLimited("LLM rate limit reached: try again shortly") from e
+            header = (e.response.headers.get("retry-after") or "") if e.response is not None else ""
+            retry = int(float(header)) if header.replace(".", "", 1).isdigit() else None  # xAI's hint, else the default
+            raise LLMRateLimited("LLM rate limit reached: try again shortly", retry_after=retry) from e
         except openai.APITimeoutError as e:
             raise LLMTimeout("The LLM did not respond in time") from e
         except openai.APIConnectionError as e:

@@ -40,6 +40,7 @@ class SearchResult(BaseModel):
     rank: int
     score: float  # cosine similarity; can range from -1 to 1 (bge scores here are ~0.3-0.9)
     chunk_id: str
+    document_id: str
     brand: str
     model: str
     source: str

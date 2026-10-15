@@ -54,6 +54,37 @@ python scripts/chat_check.py --all --out chat_check.txt   # all 12
 `POST /api/v1/chat` answers from the manuals with cited sources; `debug: true` returns the
 exact context sent to the LLM, which is what grounding must be judged against.
 
+## Errors
+
+Every error has the same shape, with the same `request_id` as the `X-Request-ID` header:
+
+```json
+{"error": {"code": "knowledge_base_empty", "message": "...", "request_id": "8f72c1a9b3e0", "details": null}}
+```
+
+`details` is a list of `{field, problem}` for `validation_error` (422) and `null` otherwise.
+Codes: `validation_error`, `route_not_found`, `method_not_allowed`, `invalid_brand`,
+`session_not_found`, `knowledge_base_empty`, `ingestion_in_progress`, `incompatible_collection`,
+`confirmation_required`, `documents_invalid`, `ingestion_write_failed` (report in `details`),
+`llm_rate_limited` (429, `Retry-After`), `llm_authentication_failed`, `llm_unavailable` (502),
+`vector_db_unavailable`, `session_store_unavailable` (503, `Retry-After`),
+`generation_not_configured` (503), `llm_timeout` (504), `internal_error` (500, no internal
+details; the traceback is logged under the request ID). `/health` keeps its own report format.
+
+## Logs
+
+The API writes JSON lines to `LOG_FILE` (default `logs/app.jsonl`, rotated at 5 MB, 3 backups,
+ignored by Git); scripts log to the console only. One `chat_completed` / `search_completed` /
+`ingest_completed` event per request with timings, tokens, retrieved and cited chunks, models
+and versions. Questions and answers are logged as lengths unless `LOG_USER_TEXT=true`; the
+API key is redacted from every log record and error message.
+
+```powershell
+python scripts/log_report.py              # requests, errors, latency per stage, tokens
+python scripts/failure_drills.py          # real failures and how each is reported
+python scripts/failure_drills.py --docker # also stops/starts Qdrant and Redis
+```
+
 ## Open items for evaluation (Steps 11-12)
 
 - **Tables:** the Tenda factory-settings table is not retrieved for "default login IP"
