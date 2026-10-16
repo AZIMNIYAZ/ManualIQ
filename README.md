@@ -85,6 +85,39 @@ python scripts/failure_drills.py          # real failures and how each is report
 python scripts/failure_drills.py --docker # also stops/starts Qdrant and Redis
 ```
 
+## Evaluation
+
+`evaluation/questions.jsonl` has 40 questions: direct, paraphrased, no brand named, tables, context
+confusion, unanswerable and out of scope. `evaluation/conversations.jsonl` has 6 conversations
+(13 turns). Labels are chunk-independent, so they score every chunk size: manual + PDF page
+range + key phrase. Several evidence locations count as alternatives, so retrieval is
+reported as Hit@K and MRR. Pages are PDF page positions, not the numbers printed in the manuals.
+
+```powershell
+python scripts/check_labels.py --review evaluation/label_review.md  # free: labels vs manuals + review sheet
+python scripts/eval_retrieval.py --label baseline                  # free: Hit@1/3/5/10, MRR, brand filter
+python scripts/eval_generation.py --limit 5                        # paid: small test (asks first)
+python scripts/eval_generation.py --label baseline                 # paid: ~73 answers + judge (asks first)
+python scripts/judge_agreement.py make  evaluation/results/<run>   # grading sheet for 20 answers
+python scripts/judge_agreement.py score evaluation/results/<run>   # judge vs human agreement
+python scripts/judge_sensitivity.py evaluation/results/<run>       # paid (~12 judge calls): planted errors caught?
+python scripts/eval_compare.py evaluation/results/<A> evaluation/results/<B>   # Step 12
+```
+
+- **Label checks:**
+  - Every key phrase must be on its stated, indexed pages.
+  - It should fit in one chunk at the current chunk size.
+  - The terms recorded for each unanswerable question must have 0 hits in the raw and cleaned text. That is a safeguard, not proof: an answer could exist only in an image. The reviewer also searches the PDFs.
+- **Answer scoring:**
+  - Refusals: correct refusals, false answers and false refusals.
+  - Key facts present, and no text from a wrong procedure.
+  - An LLM judge checks groundedness, citations and brand mixing. It sees the exact context the model saw, uses a different (non-reasoning) model at temperature 0, and has a versioned prompt.
+  - The judge's numbers are only used once its agreement with human grades (Cohen's kappa) is reported, separately for groundedness and citations.
+- **No brand named:** the system should answer separately per brand. Mixing brands is a fail; asking which router is recorded as "asked", not as a pass.
+- **Conversations:** the rewrite (brand, required terms) is scored separately. Retrieval is run both with the actual rewrite and with the expected question, so a failure is blamed on the rewriter, retrieval or generation.
+- **Repeats:** tables and context-confusion questions run 3 times, and every run is shown.
+- **Outputs:** each run saves `config.json` (all versions, models, settings and the dataset hash), `results.jsonl` and `summary.md` under `evaluation/results/`, which Git ignores. `eval_compare.py` refuses to compare runs made on different datasets.
+
 ## Open items for evaluation (Steps 11-12)
 
 - **Tables:** the Tenda factory-settings table is not retrieved for "default login IP"
