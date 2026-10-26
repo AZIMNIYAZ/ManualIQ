@@ -78,17 +78,30 @@ def rows_for(kind: str, s: dict) -> dict[str, object]:
     return out
 
 
-def outcomes(kind: str, run: Path) -> dict[str, bool]:
-    """Per question (and run): hit in the top 5 (retrieval) or pass (generation); errors left out."""
+def outcomes(kind: str, run: Path, k: int = 5, turns: bool | None = None) -> dict[str, bool]:
+    """Per question (and run): hit in the top k (retrieval) or pass (generation); errors left out.
+    turns: None = all items, False = standalone questions only, True = conversation turns only."""
     out = {}
     for line in (run / "results.jsonl").read_text(encoding="utf-8").splitlines():
         r = json.loads(line)
+        is_turn = r.get("category", "").startswith("conversation")
+        if turns is not None and is_turn != turns:
+            continue
         if kind == "retrieval":
             if r["answerable"]:
-                out[r["id"]] = r["rank"] is not None and r["rank"] <= 5
+                out[r["id"]] = r["rank"] is not None and r["rank"] <= k
         elif not r.get("error"):
             out[f"{r['id']}#{r['run']}"] = r["score"]["pass"]
     return out
+
+
+def print_flips(title: str, oa: dict[str, bool], ob: dict[str, bool]) -> None:
+    common = sorted(set(oa) & set(ob))
+    fixed = [k for k in common if not oa[k] and ob[k]]
+    broken = [k for k in common if oa[k] and not ob[k]]
+    print(f"{title} ({len(common)} compared): fixed {len(fixed)}, broken {len(broken)}, net {len(fixed) - len(broken):+d}")
+    print("  fixed:  " + (", ".join(fixed) or "none"))
+    print("  broken: " + (", ".join(broken) or "none"))
 
 
 def ci(s: dict, kind: str) -> str:
@@ -137,16 +150,15 @@ def main() -> None:
     print()
     print(f"95% confidence interval of {label}: A {ci(a['summary'], ca['kind'])}, B {ci(b['summary'], cb['kind'])}"
           " (overlapping intervals: the difference may be noise)")
-    oa, ob = outcomes(ca["kind"], args.a), outcomes(cb["kind"], args.b)
-    common = sorted(set(oa) & set(ob))
-    fixed = [k for k in common if not oa[k] and ob[k]]
-    broken = [k for k in common if oa[k] and not ob[k]]
-    what = "hit@5" if ca["kind"] == "retrieval" else "pass"
     print()
-    print(f"QUESTION FLIPS ({what}, {len(common)} compared): fixed {len(fixed)}, broken {len(broken)}, "
-          f"net {len(fixed) - len(broken):+d}")
-    print("  fixed:  " + (", ".join(fixed) or "none"))
-    print("  broken: " + (", ".join(broken) or "none"))
+    if ca["kind"] == "retrieval":
+        # Standalone questions (the headline numbers) and conversation turns, at Hit@5 and Hit@1
+        for k in (5, 1):
+            for label, turns in (("questions", False), ("conversation turns", True)):
+                print_flips(f"FLIPS hit@{k}, {label}", outcomes("retrieval", args.a, k, turns),
+                            outcomes("retrieval", args.b, k, turns))
+    else:
+        print_flips("FLIPS pass", outcomes(ca["kind"], args.a), outcomes(cb["kind"], args.b))
 
 
 if __name__ == "__main__":
