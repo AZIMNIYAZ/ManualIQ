@@ -58,6 +58,9 @@ class Settings(BaseSettings):
     # Chunking
     chunk_size: int = Field(350, gt=0, le=MAX_CHUNK_TOKENS)
     chunk_overlap: int = Field(60, ge=0)
+    # Step 12 R2: embed "Brand Model | Section" + chunk text (stored text unchanged). Off = baseline.
+    # A collection built with headers gets the suffix _ctx, so the two can never be mixed.
+    contextual_headers: bool = False
 
     # Qdrant
     qdrant_url: str = "http://127.0.0.1:6333"
@@ -95,9 +98,16 @@ class Settings(BaseSettings):
 
     @property
     def collection_name(self) -> str:
-        """rag_350_60, or rag_350_60_ctx with a suffix."""
+        """rag_350_60; rag_350_60_ctx with contextual headers; plus QDRANT_COLLECTION_SUFFIX if set."""
         name = f"{self.qdrant_collection_prefix}_{self.chunk_size}_{self.chunk_overlap}"
+        if self.contextual_headers:
+            name += "_ctx"
         return f"{name}_{self.qdrant_collection_suffix}" if self.qdrant_collection_suffix else name
+
+    @property
+    def embedding_model_version(self) -> str:
+        """As stored with every vector ("BAAI/bge-small-en-v1.5@5c38ec7"): model and revision."""
+        return f"{self.embedding_model}@{self.embedding_model_revision[:7]}"
 
     @property
     def chunking(self) -> str:

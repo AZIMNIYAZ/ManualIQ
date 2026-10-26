@@ -25,7 +25,8 @@ def test_all_ok(make_client):
     del body["llm"]
     assert body == {
         "status": "ok", "api": "ok", "qdrant": "ok", "redis": "ok",
-        "collection": {"name": "rag_350_60", "exists": False, "points": None},  # not ingested: still 200
+        "collection": {"name": "rag_350_60", "exists": False, "points": None,  # not ingested: still 200
+                       "compatible": None, "problems": []},
         "details": {},
     }
 

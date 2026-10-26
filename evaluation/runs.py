@@ -39,6 +39,7 @@ def run_config(settings: Settings, kind: str, holdout: bool = False, **extra) ->
         "dataset_hash": dataset_hash(HOLDOUT_FILE) if holdout else dataset_hash(),
         "collection": settings.collection_name,
         "chunking": settings.chunking,
+        "contextual_headers": settings.contextual_headers,
         "cleaner_version": CLEANER_VERSION,
         "embedding_model": settings.embedding_model,
         "embedding_model_revision": settings.embedding_model_revision,
@@ -61,6 +62,11 @@ def require_collection(client, settings: Settings) -> None:
         raise SystemExit(f"Qdrant unavailable at {settings.qdrant_url} ({e}): run `docker compose up -d`")
     if not exists:
         raise SystemExit(f"Collection {settings.collection_name} does not exist: run python scripts/ingest.py")
+    from app.database.qdrant import collection_problems
+    problems = collection_problems(client, settings.collection_name, settings.embedding_model_version,
+                                   settings.chunking, settings.contextual_headers)
+    if problems:
+        raise SystemExit(f"Collection {settings.collection_name} does not match the settings: " + "; ".join(problems))
 
 
 def new_run_dir(settings: Settings, kind: str, label: str | None = None) -> Path:

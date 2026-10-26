@@ -6,7 +6,7 @@ from qdrant_client import QdrantClient
 from redis import Redis
 
 from app.core.config import Settings, get_settings
-from app.database.qdrant import count, get_qdrant
+from app.database.qdrant import collection_problems, count, get_qdrant
 from app.database.redis import get_redis
 from app.models.health import CollectionInfo, HealthResponse
 
@@ -37,7 +37,12 @@ def health(
         # A missing collection is not an outage (just not ingested yet): reported, still 200
         name = settings.collection_name
         exists = qdrant.collection_exists(name)
-        collection = CollectionInfo(name=name, exists=exists, points=count(qdrant, name) if exists else None)
+        points = count(qdrant, name) if exists else None
+        collection = CollectionInfo(name=name, exists=exists, points=points)
+        if points:
+            collection.problems = collection_problems(qdrant, name, settings.embedding_model_version,
+                                                      settings.chunking, settings.contextual_headers)
+            collection.compatible = not collection.problems
     except Exception as e:
         qdrant_status = "down"
         details["qdrant"] = _error_text(e)

@@ -28,7 +28,7 @@ from app.services.embedding_service import get_embedding_service  # noqa: E402
 from evaluation.dataset import (HOLDOUT_FILE, QUESTIONS_FILE, confirm_holdout, contains,  # noqa: E402
                                 load_conversations, load_questions)
 from evaluation.metrics import (K_VALUES, Retrieved, first_hit_rank, hit_at, matched_documents,  # noqa: E402
-                                retrieval_summary)
+                                percentile, retrieval_summary)
 from evaluation.runs import JsonlWriter, md_table, new_run_dir, pct, require_collection, run_config, write_json  # noqa: E402
 
 TOP_K = 10
@@ -84,6 +84,7 @@ def main() -> None:
             "brand_source": found.filters.brand_source,
             "brand_ok": sorted(found.filters.brands) == sorted(expected_brands),
             "regulatory_results": sum(r.content_type == "regulatory" for r in results),
+            "search_ms": found.timings_ms.get("total"),
             "top": [[r.chunk_id, r.document_id, r.page_start, r.page_end, r.score] for r in results],
         }
         if item.answerable and not hit_at(row["rank"], 5) and item.key_facts:
@@ -114,6 +115,8 @@ def main() -> None:
         "by_category": by_category,
         "brand_accuracy": round(sum(r["brand_ok"] for r in rows) / len(rows), 3),
         "regulatory_leakage": sum(r["regulatory_results"] for r in rows),
+        "search_ms": {"median": percentile([r["search_ms"] for r in rows], 50),
+                      "p95": percentile([r["search_ms"] for r in rows], 95)},
         "no_brand_coverage@5": {r["id"]: f"{len(r['manuals_found@5'])}/{r['manuals_with_evidence']}"
                                 for r in rows if r["category"] == "no_brand"},
         "misses@5": [r["id"] for r in rows if r["answerable"] and not (r["rank"] and r["rank"] <= 5)],
@@ -148,6 +151,9 @@ def main() -> None:
         md_table(["category", "items", "answerable", *ks, "MRR", "brand filter"], table),
         "",
         f"Regulatory chunks in results: {summary['regulatory_leakage']} (should be 0)",
+        "",
+        f"Hit@5 95% confidence interval (all questions): {pct(o['hit@5_ci95'][0])}-{pct(o['hit@5_ci95'][1])} | "
+        f"search time median {summary['search_ms']['median']:.0f} ms, p95 {summary['search_ms']['p95']:.0f} ms",
         "",
         "No-brand questions, manuals with a matching chunk in the top 5: "
         + ", ".join(f"{k} {v}" for k, v in summary["no_brand_coverage@5"].items()),

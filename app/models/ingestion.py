@@ -24,5 +24,6 @@ class IngestionReport(BaseModel):
     ingest_run: str | None = None
     versions: dict[str, str] = {}
     warnings: list[str] = []
+    contextual_headers: dict | None = None  # header statistics and rejected section labels (R2)
     error: str | None = None
     timings_s: dict[str, float] = {}

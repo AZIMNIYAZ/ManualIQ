@@ -53,9 +53,14 @@ def rows_for(kind: str, s: dict) -> dict[str, object]:
                 if k in m:
                     out[f"{cat} {k}"] = m[k]
         out["regulatory leakage"] = s["regulatory_leakage"]
+        out["search ms median"] = (s.get("search_ms") or {}).get("median")
+        out["search ms p95"] = (s.get("search_ms") or {}).get("p95")
     else:
         q = s["questions"]
-        out["all pass"] = q["pass"]
+        out["all items pass"] = (s.get("all_items") or {}).get("pass")
+        out["question runs pass"] = q["pass"]
+        out["key facts"] = q.get("key_fact_coverage")
+        out["wrong-procedure answers"] = q.get("must_not_hits")
         out["grounded (judge)"] = q["grounded"]
         out["citations ok (judge)"] = q["citations_correct"]
         out["brand mixing"] = q["brand_mixing"]
@@ -67,8 +72,29 @@ def rows_for(kind: str, s: dict) -> dict[str, object]:
         for k, v in s["conversations"].items():
             if not isinstance(v, dict):
                 out[f"conversations {k}"] = v
+        out["chat ms median"] = (s.get("chat_ms") or {}).get("median")
+        out["chat ms p95"] = (s.get("chat_ms") or {}).get("p95")
         out["repeats"] = json.dumps(s["repeats"]).replace("\\u2713", "P").replace("\\u2717", "F")  # P pass, F fail
     return out
+
+
+def outcomes(kind: str, run: Path) -> dict[str, bool]:
+    """Per question (and run): hit in the top 5 (retrieval) or pass (generation); errors left out."""
+    out = {}
+    for line in (run / "results.jsonl").read_text(encoding="utf-8").splitlines():
+        r = json.loads(line)
+        if kind == "retrieval":
+            if r["answerable"]:
+                out[r["id"]] = r["rank"] is not None and r["rank"] <= 5
+        elif not r.get("error"):
+            out[f"{r['id']}#{r['run']}"] = r["score"]["pass"]
+    return out
+
+
+def ci(s: dict, kind: str) -> str:
+    interval = (s["overall_questions"].get("hit@5_ci95") if kind == "retrieval"
+                else (s.get("all_items") or {}).get("pass_ci95"))
+    return f"{interval[0]:.0%}-{interval[1]:.0%}" if interval else "-"
 
 
 def main() -> None:
@@ -106,6 +132,21 @@ def main() -> None:
             print(f"\nrepeats A: {va}\nrepeats B: {vb}")
             continue
         print(f"{k:42} {fmt(va, k):>10} {fmt(vb, k):>10}  {delta(va, vb, k)}")
+
+    label = "Hit@5 (all questions)" if ca["kind"] == "retrieval" else "accuracy (all items)"
+    print()
+    print(f"95% confidence interval of {label}: A {ci(a['summary'], ca['kind'])}, B {ci(b['summary'], cb['kind'])}"
+          " (overlapping intervals: the difference may be noise)")
+    oa, ob = outcomes(ca["kind"], args.a), outcomes(cb["kind"], args.b)
+    common = sorted(set(oa) & set(ob))
+    fixed = [k for k in common if not oa[k] and ob[k]]
+    broken = [k for k in common if oa[k] and not ob[k]]
+    what = "hit@5" if ca["kind"] == "retrieval" else "pass"
+    print()
+    print(f"QUESTION FLIPS ({what}, {len(common)} compared): fixed {len(fixed)}, broken {len(broken)}, "
+          f"net {len(fixed) - len(broken):+d}")
+    print("  fixed:  " + (", ".join(fixed) or "none"))
+    print("  broken: " + (", ".join(broken) or "none"))
 
 
 if __name__ == "__main__":

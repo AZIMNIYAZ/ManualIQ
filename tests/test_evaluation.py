@@ -341,3 +341,28 @@ def test_holdout_needs_typed_confirmation(monkeypatch):
         dataset.confirm_holdout()
     monkeypatch.setattr("builtins.input", lambda _: "holdout")
     dataset.confirm_holdout()
+
+
+# ---------------------------------------------------------------- Step 12 reporting
+
+def test_wilson_interval_and_percentile():
+    from evaluation.metrics import percentile, wilson
+    lo, hi = wilson(55, 73)
+    assert (round(lo, 2), round(hi, 2)) == (0.64, 0.84)
+    assert wilson(0, 0) is None and wilson(10, 10)[1] == 1.0
+    assert percentile([5, 1, 3, 2, 4], 50) == 3 and percentile([], 50) is None
+
+
+def test_compare_lists_question_flips(tmp_path):
+    import importlib.util
+    import json as _json
+    spec = importlib.util.spec_from_file_location("eval_compare", "scripts/eval_compare.py")
+    compare = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(compare)
+    a, b = tmp_path / "a", tmp_path / "b"
+    for run, ranks in ((a, {"q1": 1, "q2": None, "q3": 7}), (b, {"q1": 8, "q2": 2, "q3": 3})):
+        run.mkdir()
+        run.joinpath("results.jsonl").write_text(
+            "\n".join(_json.dumps({"id": k, "answerable": True, "rank": v}) for k, v in ranks.items()), encoding="utf-8")
+    oa, ob = compare.outcomes("retrieval", a), compare.outcomes("retrieval", b)
+    assert oa == {"q1": True, "q2": False, "q3": False} and ob == {"q1": False, "q2": True, "q3": True}

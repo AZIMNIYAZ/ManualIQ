@@ -31,9 +31,11 @@ from app.database.qdrant import CollectionMismatch, check_compatible, count, cre
 from app.models.chunk import Chunk
 from app.models.ingestion import IngestionReport
 from app.services.chunker import chunk_documents
-from app.services.document_loader import DocumentLoadError, load_all_documents
+from app.services.contextual_headers import HEADER_VERSION, build_embedding_texts
+from app.services.document_loader import DocumentLoadError, load_all_documents, load_manifest
 from app.services.embedding_service import EmbeddingService
 from app.services.text_cleaner import CLEANER_VERSION, clean_documents
+from app.services.tokenizer import get_tokenizer
 
 logger = logging.getLogger(__name__)
 
@@ -86,8 +88,15 @@ def point_id(chunk_id: str) -> str:
     return str(uuid.uuid5(POINT_NAMESPACE, chunk_id))
 
 
-def chunk_payload(chunk: Chunk, embedding_model: str, ingest_run: str) -> dict:
-    return {**chunk.model_dump(), "embedding_model": embedding_model, "ingest_run": ingest_run}
+def chunk_payload(chunk: Chunk, embedding_model: str, ingest_run: str, header: str | None = None) -> dict:
+    """`header`: the contextual header embedded with the chunk (None: headers off). The stored
+    text is always the chunk text alone."""
+    payload = {**chunk.model_dump(), "embedding_model": embedding_model, "ingest_run": ingest_run,
+               "contextual_headers": header is not None}
+    if header is not None:
+        payload["header_version"] = HEADER_VERSION
+        payload["embedded_header"] = header
+    return payload
 
 
 def ingest(
@@ -135,7 +144,15 @@ def _ingest(client, embedder, settings: Settings, recreate: bool, confirm: str |
     wrong = [c.chunk_id for c in chunks if c.chunking != settings.chunking]
     if wrong:  # the collection name and the chunker must agree (rag_200_40 holds only 200/40 chunks)
         raise IngestionError(f"{len(wrong)} chunks have chunking other than {settings.chunking}")
-    vectors = embedder.embed_documents([c.text for c in chunks])
+    headers: list[str | None] = [None] * len(chunks)
+    header_report = None
+    texts = [c.text for c in chunks]
+    if settings.contextual_headers:
+        brand_names = {m.brand: (m.aliases[0] if m.aliases else m.brand) for m in load_manifest(settings.documents_dir)}
+        texts, headers, header_report = build_embedding_texts(
+            chunks, cleaned, brand_names, lambda text: len(get_tokenizer().encode(text, add_special_tokens=True)))
+        versions["contextual_headers"] = HEADER_VERSION
+    vectors = embedder.embed_documents(texts)
     t = lap("embed", t)
 
     report = IngestionReport(
@@ -144,6 +161,7 @@ def _ingest(client, embedder, settings: Settings, recreate: bool, confirm: str |
         pages_indexed=sum(r.pages_indexed for r in clean_reports),
         pages_excluded=sum(r.pages_excluded for r in clean_reports),
         chunks_created=len(chunks),
+        contextual_headers=header_report.as_dict() if header_report else None,
     )
 
     # ---- 2. Prepare the collection
@@ -155,7 +173,8 @@ def _ingest(client, embedder, settings: Settings, recreate: bool, confirm: str |
             logger.warning("Collection deleted for recreate", extra={"fields": {"collection": name}})
         if exists:
             report.warnings = check_compatible(
-                client, name, embedder.dim, embedder.model_version, settings.chunking, CLEANER_VERSION
+                client, name, embedder.dim, embedder.model_version, settings.chunking, CLEANER_VERSION,
+                settings.contextual_headers,
             )
         else:
             create_collection(client, name, embedder.dim)
@@ -177,8 +196,8 @@ def _ingest(client, embedder, settings: Settings, recreate: bool, confirm: str |
                 name,
                 points=[
                     PointStruct(id=point_id(c.chunk_id), vector=v.tolist(),
-                                payload=chunk_payload(c, embedder.model_version, run))
-                    for c, v in zip(chunks[i:i + batch], vectors[i:i + batch])
+                                payload=chunk_payload(c, embedder.model_version, run, h))
+                    for c, v, h in zip(chunks[i:i + batch], vectors[i:i + batch], headers[i:i + batch])
                 ],
                 wait=True,
             )

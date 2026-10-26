@@ -9,6 +9,9 @@ class CollectionInfo(BaseModel):
     name: str
     exists: bool
     points: int | None  # None if the collection has not been created (not ingested yet)
+    # Do the points match the current settings (embedding model, chunking, contextual headers)?
+    compatible: bool | None = None  # None: nothing to check (missing or empty collection)
+    problems: list[str] = []
 
 
 class HealthResponse(BaseModel):

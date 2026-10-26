@@ -5,6 +5,7 @@ pages overlap the evidence pages, and it contains the key phrase. Evidence locat
 alternatives, so a question is a hit at K if any of the top K chunks matches any of them.
 """
 
+import math
 import re
 from collections import defaultdict
 from dataclasses import dataclass
@@ -62,6 +63,7 @@ def retrieval_summary(rows: list[dict]) -> dict:
     summary = {"n": n}
     for k in K_VALUES:
         summary[f"hit@{k}"] = round(sum(hit_at(r["rank"], k) for r in rows) / n, 3)
+    summary["hit@5_ci95"] = wilson(sum(hit_at(r["rank"], 5) for r in rows), n)
     summary["mrr"] = round(sum(reciprocal_rank(r["rank"]) for r in rows) / n, 3)
     return summary
 
@@ -108,6 +110,25 @@ def refusal_counts(rows: list[dict]) -> dict:
         "refusal_precision": round(c["correct_refusals"] / refused, 3) if refused else None,
         "refusal_recall": round(c["correct_refusals"] / should_refuse, 3) if should_refuse else None,
     }
+
+
+def wilson(successes: int, n: int, z: float = 1.96) -> tuple[float, float] | None:
+    """95% Wilson confidence interval for a proportion: with 40 questions, small differences
+    are inside the noise, and the interval shows it (e.g. 55/73 -> 64%-84%)."""
+    if n == 0:
+        return None
+    p = successes / n
+    centre = (p + z * z / (2 * n)) / (1 + z * z / n)
+    half = z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n)) / (1 + z * z / n)
+    return round(max(0.0, centre - half), 3), round(min(1.0, centre + half), 3)
+
+
+def percentile(values: list[float], p: float) -> float | None:
+    """Nearest-rank percentile (p in 0..100)."""
+    if not values:
+        return None
+    ordered = sorted(values)
+    return ordered[max(0, math.ceil(p / 100 * len(ordered)) - 1)]
 
 
 def agreement(pairs: list[tuple[bool, bool]]) -> dict:

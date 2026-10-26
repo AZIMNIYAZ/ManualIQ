@@ -48,8 +48,8 @@ from app.services.session_service import SessionStore  # noqa: E402
 from evaluation.dataset import (HOLDOUT_FILE, QUESTIONS_FILE, REPEAT_CATEGORIES, confirm_holdout,  # noqa: E402
                                 load_conversations, load_questions)
 from evaluation.judge import JUDGE_MAX_OUTPUT_TOKENS, JUDGE_PROMPT_VERSION, JudgeError, judge  # noqa: E402
-from evaluation.metrics import Retrieved, first_hit_rank, refusal_counts  # noqa: E402
-from evaluation.runs import (JsonlWriter, md_table, new_run_dir, pct, require_collection,  # noqa: E402
+from evaluation.metrics import Retrieved, first_hit_rank, percentile, refusal_counts, wilson  # noqa: E402
+from evaluation.runs import (JsonlWriter, md_table, new_run_dir, pct, read_jsonl, require_collection,  # noqa: E402
                              run_config, write_json)
 from evaluation.scoring import DEFAULT_TOKENS, blame, estimate, rewrite_ok, score_answer  # noqa: E402
 
@@ -226,6 +226,9 @@ def summarise(rows: list[dict]) -> dict:
         "judge_errors": sum(bool(r.get("judge_error")) for r in ok),
         "questions": {
             "pass": rate([r["score"]["pass"] for r in q_rows]),
+            "pass_ci95": wilson(sum(r["score"]["pass"] for r in q_rows), len(q_rows)),
+            "key_fact_coverage": rate([r["score"]["key_fact_coverage"] for r in q_rows]),
+            "must_not_hits": sum(bool(r["score"]["must_not_found"]) for r in q_rows),
             "refusals": refusal_counts([{"answerable": r["answerable"], "refused": r["refused"]} for r in q_rows]),
             "grounded": rate([r["score"]["grounded"] for r in q_rows]),
             "citations_correct": rate([r["score"]["citations_correct"] for r in q_rows]),
@@ -244,6 +247,10 @@ def summarise(rows: list[dict]) -> dict:
             "hit@5_expected_query": rate([r["oracle_rank"] is not None for r in follow if r["answerable"]]),
             "blame": dict(Counter(r["blame"] for r in turn_rows if r["blame"])),
         },
+        "all_items": {"pass": rate([r["score"]["pass"] for r in ok]),
+                      "pass_ci95": wilson(sum(r["score"]["pass"] for r in ok), len(ok))},
+        "chat_ms": {"median": percentile([r["timings_ms"]["total"] for r in ok], 50),
+                    "p95": percentile([r["timings_ms"]["total"] for r in ok], 95)},
         "tokens": dict(tokens),
         "generate_ms_median": statistics.median([r["timings_ms"]["generate"] for r in ok]) if ok else None,
     }
@@ -287,6 +294,11 @@ def write_markdown(run_dir: Path, config: dict, summary: dict, rows: list[dict])
         "False answers = answered although the manuals do not contain the answer (the dangerous error).",
         "",
         "Automatic warnings: " + (", ".join(f"{k} x{v}" for k, v in q["warnings"].items()) or "none"),
+        "",
+        f"Accuracy, all items: {pct(summary['all_items']['pass'])} (95% CI {pct((summary['all_items']['pass_ci95'] or [None])[0])}-"
+        f"{pct((summary['all_items']['pass_ci95'] or [None, None])[1])}); question runs: {pct(q['pass'])} | key facts "
+        f"{pct(q['key_fact_coverage'])} | wrong-procedure text in {q['must_not_hits']} answers | chat time median "
+        f"{summary['chat_ms']['median'] or 0:.0f} ms, p95 {summary['chat_ms']['p95'] or 0:.0f} ms",
     ]
     if summary["repeats"]:
         lines += ["", "## Repeated questions (each run shown; ! = error)", ""]
@@ -346,7 +358,16 @@ def main() -> None:
     parser.add_argument("--label")
     parser.add_argument("--yes", action="store_true", help="skip the cost confirmation")
     parser.add_argument("--holdout", action="store_true", help="the held-out questions (baseline and final only)")
+    parser.add_argument("--resummarise", type=Path, metavar="RUN_DIR",
+                        help="free: recompute summary.json/summary.md of an existing run from its results.jsonl")
     args = parser.parse_args()
+    if args.resummarise:
+        config = json.loads((args.resummarise / "config.json").read_text(encoding="utf-8"))
+        rows = read_jsonl(args.resummarise / "results.jsonl")
+        summary = summarise(rows)
+        write_json(args.resummarise / "summary.json", {"config": config, "summary": summary})
+        write_markdown(args.resummarise, config, summary, rows)
+        sys.exit(f"Re-summarised {args.resummarise} ({len(rows)} rows, no API calls)")
     sys.stdout.reconfigure(errors="replace")  # the Windows console cannot show ✓/✗ (summary.md is UTF-8)
 
     settings = get_settings()
