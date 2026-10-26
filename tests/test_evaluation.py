@@ -312,3 +312,32 @@ def test_dataset_hash_ignores_line_endings(tmp_path):
     lf.write_bytes(b'{"a": 1}\n{"b": 2}\n')
     crlf.write_bytes(b'{"a": 1}\r\n{"b": 2}\r\n')
     assert dataset.dataset_hash(lf) == dataset.dataset_hash(crlf)
+
+
+# ---------------------------------------------------------------- held-out set
+
+def test_holdout_is_separate_from_the_development_set():
+    holdout = dataset.load_questions(dataset.HOLDOUT_FILE)
+    dev = [*dataset.load_questions(), *(t for c in dataset.load_conversations() for t in c.turns)]
+    assert len(holdout) == 15 and not {h.id for h in holdout} & {d.id for d in dev}
+    dev_pages = {(e.document_id, p) for d in dev for e in d.evidence for p in range(e.pages[0], e.pages[1] + 1)}
+    for h in holdout:  # unseen content: no held-out evidence page is used by a development question
+        for e in h.evidence:
+            assert not {(e.document_id, p) for p in range(e.pages[0], e.pages[1] + 1)} & dev_pages, h.id
+
+
+@pytest.mark.skipif(not list(Path("documents").glob("*.pdf")), reason="manual PDFs not present")
+def test_real_holdout_labels_match_the_manuals():
+    from app.services.document_loader import load_all_documents
+    from app.services.text_cleaner import clean_documents
+
+    docs, _ = clean_documents(load_all_documents(Settings(_env_file=None).documents_dir))
+    assert check_labels(dataset.load_questions(dataset.HOLDOUT_FILE), [], docs).errors == []
+
+
+def test_holdout_needs_typed_confirmation(monkeypatch):
+    monkeypatch.setattr("builtins.input", lambda _: "yes")
+    with pytest.raises(SystemExit, match="Cancelled"):
+        dataset.confirm_holdout()
+    monkeypatch.setattr("builtins.input", lambda _: "holdout")
+    dataset.confirm_holdout()

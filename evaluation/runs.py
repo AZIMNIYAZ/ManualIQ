@@ -15,7 +15,7 @@ from app.core.config import Settings
 from app.services.prompts import PROMPT_VERSION
 from app.services.query_rewriter import REWRITE_PROMPT_VERSION
 from app.services.text_cleaner import CLEANER_VERSION
-from evaluation.dataset import dataset_hash
+from evaluation.dataset import HOLDOUT_FILE, dataset_hash
 
 RESULTS_DIR = Path(__file__).resolve().parent / "results"
 
@@ -24,18 +24,19 @@ def _git_commit() -> str | None:
     try:
         out = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True, timeout=5)
         dirty = subprocess.run(["git", "status", "--porcelain", "--", "app", "evaluation/questions.jsonl",
-                                "evaluation/conversations.jsonl"], capture_output=True, text=True, timeout=5)
+                                "evaluation/conversations.jsonl", "evaluation/holdout.jsonl"], capture_output=True, text=True, timeout=5)
         return out.stdout.strip() + ("+uncommitted" if dirty.stdout.strip() else "") if out.returncode == 0 else None
     except (OSError, subprocess.SubprocessError):
         return None
 
 
-def run_config(settings: Settings, kind: str, **extra) -> dict:
+def run_config(settings: Settings, kind: str, holdout: bool = False, **extra) -> dict:
     return {
         "kind": kind,
+        "dataset": "holdout" if holdout else "dev",
         "started": datetime.now().isoformat(timespec="seconds"),
         "git_commit": _git_commit(),
-        "dataset_hash": dataset_hash(),
+        "dataset_hash": dataset_hash(HOLDOUT_FILE) if holdout else dataset_hash(),
         "collection": settings.collection_name,
         "chunking": settings.chunking,
         "cleaner_version": CLEANER_VERSION,

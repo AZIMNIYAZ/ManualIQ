@@ -45,7 +45,8 @@ from app.services.generation_service import (GenerationError, GenerationNotConfi
                                              GrokGenerationService, LLMAuthenticationError, create_rewriter)
 from app.services.ingestion_service import point_id  # noqa: E402
 from app.services.session_service import SessionStore  # noqa: E402
-from evaluation.dataset import REPEAT_CATEGORIES, load_conversations, load_questions  # noqa: E402
+from evaluation.dataset import (HOLDOUT_FILE, QUESTIONS_FILE, REPEAT_CATEGORIES, confirm_holdout,  # noqa: E402
+                                load_conversations, load_questions)
 from evaluation.judge import JUDGE_MAX_OUTPUT_TOKENS, JUDGE_PROMPT_VERSION, JudgeError, judge  # noqa: E402
 from evaluation.metrics import Retrieved, first_hit_rank, refusal_counts  # noqa: E402
 from evaluation.runs import (JsonlWriter, md_table, new_run_dir, pct, require_collection,  # noqa: E402
@@ -58,7 +59,7 @@ CATEGORY_ORDER = ["direct", "paraphrased", "no_brand", "tables", "context_confus
 # ------------------------------------------------------------------ planning
 
 def select_questions(args) -> list:
-    questions = load_questions()
+    questions = load_questions(HOLDOUT_FILE if args.holdout else QUESTIONS_FILE)
     if args.ids:
         wanted = set(args.ids.split(","))
         questions = [q for q in questions if q.id in wanted]
@@ -76,7 +77,7 @@ def select_questions(args) -> list:
 
 
 def select_conversations(args) -> list:
-    if args.no_conversations or args.ids or (args.category and args.category != "conversation"):
+    if args.holdout or args.no_conversations or args.ids or (args.category and args.category != "conversation"):
         return []
     conversations = load_conversations()
     return conversations[:1] if args.limit else conversations
@@ -344,10 +345,13 @@ def main() -> None:
     parser.add_argument("--judge-model", help="defaults to XAI_REWRITE_MODEL (non-reasoning)")
     parser.add_argument("--label")
     parser.add_argument("--yes", action="store_true", help="skip the cost confirmation")
+    parser.add_argument("--holdout", action="store_true", help="the held-out questions (baseline and final only)")
     args = parser.parse_args()
     sys.stdout.reconfigure(errors="replace")  # the Windows console cannot show ✓/✗ (summary.md is UTF-8)
 
     settings = get_settings()
+    if args.holdout:
+        confirm_holdout()  # always typed: --yes only skips the cost prompt
     questions, conversations = select_questions(args), select_conversations(args)
     jobs = [(q, run) for q in questions for run in range(1, repeats_for(q, args) + 1)]
     turns = sum(len(c.turns) for c in conversations)
@@ -393,8 +397,8 @@ def main() -> None:
            "rewriter": create_rewriter(settings), "judge": judge_llm, "store": store,
            "aliases": alias_table_from_manifest(settings.documents_dir)}
 
-    run_dir = new_run_dir(settings, "generation", args.label)
-    config = run_config(settings, "generation", judge_model=None if args.no_judge else judge_model,
+    run_dir = new_run_dir(settings, "generation_holdout" if args.holdout else "generation", args.label)
+    config = run_config(settings, "generation", holdout=args.holdout, judge_model=None if args.no_judge else judge_model,
                         judge_prompt_version=JUDGE_PROMPT_VERSION, judge_temperature=0.0,
                         selection={k: v for k, v in vars(args).items() if k not in ("yes",)}, estimate=est)
     write_json(run_dir / "config.json", config)

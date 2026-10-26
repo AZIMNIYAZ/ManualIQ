@@ -20,7 +20,8 @@ from app.core.config import get_settings  # noqa: E402
 from app.services.chunker import chunk_documents  # noqa: E402
 from app.services.document_loader import load_all_documents  # noqa: E402
 from app.services.text_cleaner import clean_documents  # noqa: E402
-from evaluation.dataset import dataset_hash, fact_label, load_conversations, load_questions, normalise  # noqa: E402
+from evaluation.dataset import (HOLDOUT_FILE, dataset_hash, fact_label, load_conversations,  # noqa: E402
+                                load_questions, normalise)
 from evaluation.labels import check_labels  # noqa: E402
 
 
@@ -30,18 +31,23 @@ def main() -> None:
     parser.add_argument("--size", type=int, default=settings.chunk_size)
     parser.add_argument("--overlap", type=int, default=settings.chunk_overlap)
     parser.add_argument("--out")
+    parser.add_argument("--holdout", action="store_true", help="check the held-out questions (labels only, no system run)")
     parser.add_argument("--review", help="write a Markdown review sheet (evidence excerpts, PDF pages) to this file")
     args = parser.parse_args()
     if args.out:
         sys.stdout = open(args.out, "w", encoding="utf-8")
 
-    questions, conversations = load_questions(), load_conversations()
+    if args.holdout:
+        questions, conversations = load_questions(HOLDOUT_FILE), []
+    else:
+        questions, conversations = load_questions(), load_conversations()
     docs, _ = clean_documents(load_all_documents(settings.documents_dir))
     chunks, _ = chunk_documents(docs, args.size, args.overlap)
     report = check_labels(questions, conversations, docs, chunks)
 
     turns = sum(len(c.turns) for c in conversations)
-    print(f"Dataset {dataset_hash()}: {len(questions)} questions "
+    print(f"Dataset {dataset_hash(HOLDOUT_FILE) if args.holdout else dataset_hash()}"
+          f"{' (HELD-OUT)' if args.holdout else ''}: {len(questions)} questions "
           f"({', '.join(f'{k} {v}' for k, v in Counter(q.category for q in questions).items())}), "
           f"{len(conversations)} conversations ({turns} turns)")
     print(f"Evidence locations checked: {report.checked_evidence} | chunk check at {args.size}/{args.overlap}")

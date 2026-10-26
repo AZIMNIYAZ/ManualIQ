@@ -20,6 +20,9 @@ from pydantic import BaseModel, Field, model_validator
 DATA_DIR = Path(__file__).resolve().parent
 QUESTIONS_FILE = DATA_DIR / "questions.jsonl"
 CONVERSATIONS_FILE = DATA_DIR / "conversations.jsonl"
+# Held-out questions: never used for tuning; run once on the baseline and once on the final
+# configuration (Step 12). Standalone questions only.
+HOLDOUT_FILE = DATA_DIR / "holdout.jsonl"
 
 Category = Literal["direct", "paraphrased", "no_brand", "tables", "context_confusion",
                    "unanswerable", "out_of_scope"]
@@ -126,6 +129,14 @@ def load_questions(path: Path = QUESTIONS_FILE) -> list[Question]:
 
 def load_conversations(path: Path = CONVERSATIONS_FILE) -> list[Conversation]:
     return [Conversation(**row) for row in _read_jsonl(path)]
+
+
+def confirm_holdout(assume_yes: bool = False) -> None:
+    """The held-out set only stays unseen if it is not run during tuning."""
+    print("The held-out set is run only twice: on the baseline and on the FINAL configuration. "
+          "Never use its results to change the system.")
+    if not assume_yes and input("Type 'holdout' to continue: ").strip() != "holdout":
+        raise SystemExit("Cancelled.")
 
 
 def dataset_hash(*paths: Path) -> str:

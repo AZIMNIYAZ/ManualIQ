@@ -25,7 +25,8 @@ from app.models.search import SearchRequest  # noqa: E402
 from app.services import retrieval_service  # noqa: E402
 from app.services.brand_detection import alias_table_from_manifest  # noqa: E402
 from app.services.embedding_service import get_embedding_service  # noqa: E402
-from evaluation.dataset import contains, load_conversations, load_questions  # noqa: E402
+from evaluation.dataset import (HOLDOUT_FILE, QUESTIONS_FILE, confirm_holdout, contains,  # noqa: E402
+                                load_conversations, load_questions)
 from evaluation.metrics import (K_VALUES, Retrieved, first_hit_rank, hit_at, matched_documents,  # noqa: E402
                                 retrieval_summary)
 from evaluation.runs import JsonlWriter, md_table, new_run_dir, pct, require_collection, run_config, write_json  # noqa: E402
@@ -38,11 +39,11 @@ def to_retrieved(r) -> Retrieved:
                      page_end=r.page_end, content_type=r.content_type, score=r.score, text=r.text)
 
 
-def items():
+def items(holdout: bool = False):
     """(category, item, query, source) for every standalone question and conversation turn."""
-    for q in load_questions():
+    for q in load_questions(HOLDOUT_FILE if holdout else QUESTIONS_FILE):
         yield q.category, q, q.question, "question"
-    for conv in load_conversations():
+    for conv in ([] if holdout else load_conversations()):
         for i, turn in enumerate(conv.turns):
             if i == 0:
                 yield "conversation_first", turn, turn.question, "conversation"
@@ -53,20 +54,24 @@ def items():
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--label", help="added to the results folder name")
+    parser.add_argument("--holdout", action="store_true", help="the held-out questions (baseline and final only)")
+    parser.add_argument("--yes", action="store_true")
     args = parser.parse_args()
+    if args.holdout:
+        confirm_holdout(args.yes)
 
     settings = get_settings()
     client, embedder = create_qdrant_client(settings), get_embedding_service()
     aliases = alias_table_from_manifest(settings.documents_dir)
     require_collection(client, settings)
-    run_dir = new_run_dir(settings, "retrieval", args.label)
-    config = run_config(settings, "retrieval", retrieval_top_k=TOP_K,
+    run_dir = new_run_dir(settings, "retrieval_holdout" if args.holdout else "retrieval", args.label)
+    config = run_config(settings, "retrieval", holdout=args.holdout, retrieval_top_k=TOP_K,
                         note="conversation follow-ups use expected_query (oracle rewrite)")
     write_json(run_dir / "config.json", config)
     out = JsonlWriter(run_dir / "results.jsonl")
 
     rows = []
-    for category, item, query, source in items():
+    for category, item, query, source in items(args.holdout):
         found = retrieval_service.search(client, embedder, settings, SearchRequest(query=query, top_k=TOP_K),
                                          aliases, log_event=False)
         results = [to_retrieved(r) for r in found.results]
