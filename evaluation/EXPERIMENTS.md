@@ -33,6 +33,8 @@ final configuration.
 | R1c | **chunks 500/60** | **62%** | **88%** | 94% | **0.74** | **+4 / −0** | pending | pending | **base for R2–R4**; answer run to confirm |
 | R2a | **500/60 + contextual headers** (vs R1c) | **84%** | **94%** | 94% | **0.88** | **+2 / −0** vs R1c | pending | pending | **kept**: best so far; answer run to confirm |
 | R2b | 350/60 + contextual headers (vs baseline) | 66% | 94% | 94% | 0.77 | +6 / −0 vs baseline | – | – | confirms R2a: the header effect does not depend on chunk size |
+| R3a | 500/60 + headers **+ hybrid search** (vs R2a) | 84% | 94% | 94% | 0.89 | +1 / −0 vs R2a | – | – | **rejected**: below the agreed bar; dependency not adopted |
+| R3b | 350/60 + hybrid search (vs baseline) | 56% | 91% | 91% | 0.70 | +5 / −0 vs baseline | – | – | helps on its own, but less than headers (R2b) |
 
 ### R1: chunk size and overlap
 
@@ -108,3 +110,38 @@ all 53 items (0 flips).
   much here) and R4 (re-ranking).
 - The interval for Hit@5 still overlaps the baseline's, but the gains are consistent across both arms
   with nothing broken. The paid answer run decides.
+
+### R3: hybrid search (dense + BM25 keywords) - rejected
+
+**Agreed before the run:** hybrid is kept only if, against the current best (R2a), it fixes at least 2
+questions with 0 broken, or raises Hit@1/MRR by about 5 points or more, with no regression in tables,
+context confusion or no-brand questions and acceptable latency. Otherwise the extra dependency
+(`fastembed` 0.9.0 and onnxruntime) and code are not worth having.
+
+**Setup** (branch `r3-hybrid`, commit 3660329, not merged):
+- BM25 keyword vectors from fastembed's `Qdrant/bm25`, built from the same text as the dense embedding.
+  Qdrant applied the IDF.
+- Both searches got the same brand and regulatory filter (tested against real Qdrant: a stronger keyword
+  match in another brand never got through).
+- The results were merged with RRF (k = 60), 20 candidates from each search.
+- The dense vectors were identical to the compared collections (max difference 0), so differences come
+  from the keywords alone.
+
+**Results:**
+
+| Comparison | Hit@1 | Hit@5 | MRR | Fixed | Broken | Search median |
+|---|---|---|---|---|---|---|
+| R3a: `rag_500_60_ctx` → `+ hybrid` | 84% → 84% | 94% → 94% | 0.88 → 0.89 | cv-04-1 | none | 46 → 56 ms |
+| R3b: `rag_350_60` → `+ hybrid` | 50% → 56% | 78% → 91% | 0.64 → 0.70 | c-as-01, cv-01-2, d-dl-01, p-dl-02, t-te-01 | none | 58 → 57 ms |
+
+- **R3a misses the bar.** It fixed 1 question: cv-04-1, where "highest priority" matched "priority" on
+  the D-Link QoS page. Hit@1 is unchanged and MRR is +0.01. Search is about 9 ms slower, and no-brand
+  coverage fell from 16 to 14 of 24 manual matches.
+- **R3b explains why.** Keywords help the plain baseline (5 fixed, 0 broken), but contextual headers
+  already gave the same Hit@5 (94%) with a better rank 1 (Hit@1 66% vs 56%). The headers already capture
+  what the keywords add.
+- **As predicted, keywords did not fix the wording gaps** (p-as-02 "keep everyone else out", p-te-01
+  "kick it off for good"), because the user's words do not appear in the manual.
+- **Clean-up:** the code stays only on its branch. `fastembed` and its 9 extra packages were uninstalled
+  (the package list is identical to before R3), the BM25 model cache and the `_hyb` collections were
+  deleted, and `requirements.txt` is unchanged.
