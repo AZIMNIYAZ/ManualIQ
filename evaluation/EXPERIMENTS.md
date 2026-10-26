@@ -35,6 +35,8 @@ final configuration.
 | R2b | 350/60 + contextual headers (vs baseline) | 66% | 94% | 94% | 0.77 | +6 / −0 vs baseline | – | – | confirms R2a: the header effect does not depend on chunk size |
 | R3a | 500/60 + headers **+ hybrid search** (vs R2a) | 84% | 94% | 94% | 0.89 | +1 / −0 vs R2a | – | – | **rejected**: below the agreed bar; dependency not adopted |
 | R3b | 350/60 + hybrid search (vs baseline) | 56% | 91% | 91% | 0.70 | +5 / −0 vs baseline | – | – | helps on its own, but less than headers (R2b) |
+| R4a | 500/60 + headers **+ re-ranking** (vs R2a) | 84% | 94% | 94% | 0.88 | +0 / −0 vs R2a (Hit@1: +2 / −2) | – | – | **rejected**: no gain, re-ranking p95 2.65 s |
+| R4b | 350/60 + re-ranking (vs baseline) | 66% | 88% | 91% | 0.74 | +4 / −1 vs baseline | – | – | helps on its own, but less than headers and breaks p-tp-02 |
 
 ### R1: chunk size and overlap
 
@@ -145,3 +147,57 @@ context confusion or no-brand questions and acceptable latency. Otherwise the ex
 - **Clean-up:** the code stays only on its branch. `fastembed` and its 9 extra packages were uninstalled
   (the package list is identical to before R3), the BM25 model cache and the `_hyb` collections were
   deleted, and `requirements.txt` is unchanged.
+
+### R4: cross-encoder re-ranking - rejected
+
+**Agreed before the run** (on the 32 standalone questions, against R2a), keep re-ranking only if:
+- **Gain (any one):** Hit@5 at least 2 fixed with 0 broken; or Hit@1 net +2 with 0 broken at Hit@5; or
+  MRR +0.05 or more.
+- **No regression** in tables, context confusion or no-brand questions.
+- **Latency:** re-ranking adds at most 1 s at p95.
+
+**Setup** (branch `r4-rerank`, commit 1244d9b, not merged):
+- Model: `cross-encoder/ms-marco-MiniLM-L-6-v2`, revision 233902d, Apache 2.0, 92 MB. Downloaded with only
+  the needed files; the full repository is 890 MB because of ONNX and OpenVINO copies.
+- It re-ranks the top 20 filtered dense candidates and keeps the top 5. Each passage is scored with the
+  header it was embedded with.
+- No new package: it uses the existing `sentence-transformers`.
+- With re-ranking off, results were identical to before (53/53 items).
+
+**Before the run:** on R2a, 43 of the 44 answerable items had their evidence in the top 20 (32 questions
++ 12 conversation turns). That is the ceiling for re-ranking, not a prediction:
+- p-as-02 ("keep everyone else out") was at rank 20, and cv-04-1 at rank 14;
+- p-te-01 ("kick it off for good") was not in the top 20, so re-ranking could not fix it.
+
+**Results:**
+
+| Comparison | Hit@1 | Hit@5 | MRR | Hit@5 fixed / broken | Hit@1 fixed / broken | Re-rank time |
+|---|---|---|---|---|---|---|
+| R4a: R2a → `+ re-ranking` | 84% → 84% | 94% → 94% | 0.88 → 0.88 | none / none | c-dl-02, p-dl-02 / c-dl-01, p-tp-01 | median 2.53 s, p95 2.65 s |
+| R4b: `rag_350_60` → `+ re-ranking` | 50% → 66% | 78% → 88% | 0.64 → 0.74 | c-as-01, d-dl-01, p-dl-02, t-te-01 / **p-tp-02** | 7 / 2 | median 1.75 s, p95 1.86 s |
+
+- **R4a fails on gain and on latency.** No question was fixed at Hit@5; Hit@1 swapped two questions for two
+  others; MRR +0.01. Re-ranking 20 passages of about 500 tokens takes about 2.5 s on this CPU (10 threads).
+  The only gain was the conversation turn cv-04-1 (D-Link "highest priority"), which moved into the top 5.
+- **The target miss was not fixed.** p-as-02 ("keep everyone else out" → MAC filter) stayed outside the top
+  5. A single example before the run had already shown the model scoring the MAC-filter passage below an
+  unrelated setup passage. This model was trained on web search questions (MS MARCO) and does not bridge this
+  wording gap.
+- **R4b:** re-ranking helps the plain baseline, but less than contextual headers (R2b: 6 fixed / 0 broken,
+  Hit@1 66%). It broke p-tp-02 and gave no gain on paraphrased questions.
+- **Truncation:** at 500/60, 175 of 1,060 question + passage pairs were longer than 512 tokens and their end
+  was cut for scoring. For every evidence chunk, the key phrase was in the part the model read, so truncation
+  did not hide any evidence (checked with the exact header + text the re-ranker scored).
+- **Clean-up:** the code stays on its branch only. The model cache was deleted; no package was added or
+  changed.
+
+### Retrieval: where things stand
+
+The current best is **500/60 + contextual headers** (R2a): Hit@1 84%, Hit@5 94%, MRR 0.88 on the 32
+questions, against the baseline's 50%, 78% and 0.64.
+
+- **R5 (top-k 5 → 8) is not run.** On R2a, Hit@10 equals Hit@5 (94%): no evidence sits at ranks 6–10, so
+  more chunks would only add tokens and noise.
+- **Remaining misses:** two paraphrases whose wording is absent from the manual. p-as-02 is at rank 20, and
+  p-te-01 is outside the top 20. Retrieval experiments did not fix them; whether the answer prompt and model
+  handle the context well is decided by the paid answer runs.
