@@ -53,6 +53,11 @@ def rows_for(kind: str, s: dict) -> dict[str, object]:
                 if k in m:
                     out[f"{cat} {k}"] = m[k]
         out["regulatory leakage"] = s["regulatory_leakage"]
+        ctx = s.get("context") or {}
+        out["context: evidence reaches LLM"] = ctx.get("hit")
+        out["context: all key facts"] = ctx.get("key_facts_all")
+        out["context tokens median"] = ctx.get("tokens_median")
+        out["context tokens p95"] = ctx.get("tokens_p95")
         out["search ms median"] = (s.get("search_ms") or {}).get("median")
         out["search ms p95"] = (s.get("search_ms") or {}).get("p95")
     else:
@@ -78,7 +83,7 @@ def rows_for(kind: str, s: dict) -> dict[str, object]:
     return out
 
 
-def outcomes(kind: str, run: Path, k: int = 5, turns: bool | None = None) -> dict[str, bool]:
+def outcomes(kind: str, run: Path, k: int | str = 5, turns: bool | None = None) -> dict[str, bool]:
     """Per question (and run): hit in the top k (retrieval) or pass (generation); errors left out.
     turns: None = all items, False = standalone questions only, True = conversation turns only."""
     out = {}
@@ -88,7 +93,10 @@ def outcomes(kind: str, run: Path, k: int = 5, turns: bool | None = None) -> dic
         if turns is not None and is_turn != turns:
             continue
         if kind == "retrieval":
-            if r["answerable"]:
+            if r["answerable"] and k == "context":
+                if "context_hit" in r:
+                    out[r["id"]] = r["context_hit"]
+            elif r["answerable"]:
                 out[r["id"]] = r["rank"] is not None and r["rank"] <= k
         elif not r.get("error"):
             out[f"{r['id']}#{r['run']}"] = r["score"]["pass"]
@@ -153,9 +161,9 @@ def main() -> None:
     print()
     if ca["kind"] == "retrieval":
         # Standalone questions (the headline numbers) and conversation turns, at Hit@5 and Hit@1
-        for k in (5, 1):
+        for k in ("context", 5, 1):
             for label, turns in (("questions", False), ("conversation turns", True)):
-                print_flips(f"FLIPS hit@{k}, {label}", outcomes("retrieval", args.a, k, turns),
+                print_flips(f"FLIPS {'evidence reaches LLM' if k == 'context' else f'hit@{k}'}, {label}", outcomes("retrieval", args.a, k, turns),
                             outcomes("retrieval", args.b, k, turns))
     else:
         print_flips("FLIPS pass", outcomes(ca["kind"], args.a), outcomes(cb["kind"], args.b))

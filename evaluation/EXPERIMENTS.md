@@ -37,6 +37,8 @@ final configuration.
 | R3b | 350/60 + hybrid search (vs baseline) | 56% | 91% | 91% | 0.70 | +5 / −0 vs baseline | – | – | helps on its own, but less than headers (R2b) |
 | R4a | 500/60 + headers **+ re-ranking** (vs R2a) | 84% | 94% | 94% | 0.88 | +0 / −0 vs R2a (Hit@1: +2 / −2) | – | – | **rejected**: no gain, re-ranking p95 2.65 s |
 | R4b | 350/60 + re-ranking (vs baseline) | 66% | 88% | 91% | 0.74 | +4 / −1 vs baseline | – | – | helps on its own, but less than headers and breaks p-tp-02 |
+| P1a | parent-child: children 200/40 + headers, parents 500, 5 sent (vs R2a) | 84% | 91% | 94% | 0.88 | +0 / −1 vs R2a (evidence reaching LLM) | – | – | **rejected**; context confusion Hit@1 100% |
+| P1b | parent-child: parents ~1000, 3 sent (vs R2a) | 84% | 88% | 94% | 0.87 | +0 / −2 vs R2a | – | – | **rejected**: tables 80%, +21% context tokens |
 
 ### R1: chunk size and overlap
 
@@ -201,3 +203,74 @@ questions, against the baseline's 50%, 78% and 0.64.
 - **Remaining misses:** two paraphrases whose wording is absent from the manual. p-as-02 is at rank 20, and
   p-te-01 is outside the top 20. Retrieval experiments did not fix them; whether the answer prompt and model
   handle the context well is decided by the paid answer runs.
+
+## Diagnosis of the remaining misses (mentor's suggestion: understand before experimenting)
+
+After R4, the misses were traced on the current best (R2a) **before** further experiments: the
+evidence chunk, its similarity to the question, and what ranked above it.
+
+| Question | Evidence chunk | Cosine: evidence vs 1st | What ranked above |
+|---|---|---|---|
+| p-te-01 "device I don't recognise … kick it off for good" | pp. 60–63: 7.3 Add to blacklist + 7.4 + 7.5 + start of 8 | 0.625 vs 0.783 | generic Wi-Fi pages (hidden network, login) |
+| p-as-02 "only my own devices … keep everyone else out" | pp. 85–87: MAC filter + RADIUS + Professional | 0.670 vs 0.713 (rank 20) | FAQ, Bridge, Router Setup |
+| cv-04-1 "give my laptop the highest priority" | pp. 69–70: QoS Engine | 0.708 vs 0.761 (rank 14) | Before you Begin, Troubleshooting, Modem |
+
+Four candidate causes:
+1. **Several topics in one chunk** (the 500-token chunks above).
+2. **Header lost.** The Tenda chunk starts with the trusted heading "7.3 Add a client to the blacklist",
+   but it is so long that its header was shortened to "Tenda" to fit 512 tokens. This happened to 17
+   chunks.
+3. **Generic pages** attract vague wording.
+4. **Wording gap.** The user's words do not appear in the manual.
+
+P1 was designed to test causes 1 and 2.
+
+### P1: parent-child chunking - rejected
+
+**Setup** (branch `p1-parent-child`, commit b5547b0, not merged):
+- Children of 200 tokens (overlap 40, with contextual headers) are searched; children never cross their
+  parent.
+- Each child's parent is sent to the LLM: heading-aligned, no overlap, stored in a separate collection
+  without vectors (`…_parents`).
+- Children are de-duplicated by parent and ranked by their best child; the brand and regulatory filters
+  apply to the children.
+- No child header had to be shortened (against 17 at 500/60).
+- With flat chunking the search was unchanged (53/53 items).
+
+**Predictions, written before the run:** p-te-01 should improve, p-as-02 may improve, cv-04-1 should
+not.
+
+**Agreed bar:** against R2a on the 32 questions, at least 2 fixed with 0 broken, or Hit@1 net +2, or MRR
++0.05; no regression in tables, context confusion or no-brand questions; context tokens at most +25%.
+
+**What reaches the LLM** (new measures, computed on the first TOP_K results within the token budget):
+
+| | Evidence in context | All key facts in context | Context tokens (median) | Fixed / broken | Hit@1 | Search median |
+|---|---|---|---|---|---|---|
+| R2a: 500/60 + headers | **94%** | **93%** | 2,128 | – | 84% | 55 ms |
+| P1a: parents 500, 5 sent | 91% | 89% | 2,073 | 0 / 1 (p-dl-02) | 84% (2 fixed, 2 broken) | 88 ms |
+| P1b: parents ~1,000, 3 sent | 88% | 82% | 2,569 (+21%) | 0 / 2 (p-dl-02, t-tp-01) | 84% | 85 ms |
+
+- **The predictions failed.** For p-te-01 and p-as-02 even the clean single-topic child was outside the
+  top 20 children. Causes 1 and 2 were real but minor.
+- **The real cause is the wording gap (cause 4).** The same clean evidence child, ranked against
+  different wordings of the question:
+
+| Wording | Evidence child rank | Cosine |
+|---|---|---|
+| "There's a device I don't recognise… kick it off for good?" | 126 of 201 | 0.624 |
+| "How do I block an unknown device on my Tenda router?" | 9 | 0.717 |
+| "How do I add a client to the blacklist on my Tenda router?" | **1** | **0.864** |
+| "Only my own devices… keep everyone else out?" | 90 of 153 | 0.625 |
+| "How do I allow only my own devices to connect…?" | 60 | 0.649 |
+| "How do I set up the wireless MAC filter on my ASUS router?" | **1** | **0.887** |
+
+  With the manual's words, retrieval is already perfect; with the user's words, the embedding model
+  does not make the connection. This cannot be fixed by chunking, re-ranking or keywords (R3, R4, P1);
+  it needs the question to be expressed in the manual's vocabulary.
+- **One positive result: context confusion Hit@1 rose to 100% in both arms** (small children pinpoint
+  the right OS variant or add/remove procedure). It did not change what reaches the LLM (already 100%),
+  so it does not outweigh the losses.
+- **Kept on the main branch:** the "what reaches the LLM" measures (evidence in context, all key facts in
+  context, context tokens), which apply to any strategy. **Clean-up:** the P1 code stays on its branch
+  only, and the four P1 collections were deleted.

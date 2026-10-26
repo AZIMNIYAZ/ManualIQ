@@ -24,6 +24,7 @@ from app.database.qdrant import create_qdrant_client  # noqa: E402
 from app.models.search import SearchRequest  # noqa: E402
 from app.services import retrieval_service  # noqa: E402
 from app.services.brand_detection import alias_table_from_manifest  # noqa: E402
+from app.services.context_builder import build_context  # noqa: E402
 from app.services.embedding_service import get_embedding_service  # noqa: E402
 from evaluation.dataset import (HOLDOUT_FILE, QUESTIONS_FILE, confirm_holdout, contains,  # noqa: E402
                                 load_conversations, load_questions)
@@ -37,6 +38,35 @@ TOP_K = 10
 def to_retrieved(r) -> Retrieved:
     return Retrieved(chunk_id=r.chunk_id, document_id=r.document_id, brand=r.brand, page_start=r.page_start,
                      page_end=r.page_end, content_type=r.content_type, score=r.score, text=r.text)
+
+
+def context_checks(settings, results, item) -> dict:
+    """What the LLM would receive: the first TOP_K results within the context budget. Measures
+    whether the evidence and all of a question's key facts reach the LLM, without paying for answers."""
+    ctx = build_context(results[:settings.top_k], settings.context_max_tokens)
+    sent = [to_retrieved(s.result) for s in ctx.sources]
+    out = {"context_tokens": ctx.tokens, "context_sources": len(ctx.sources)}
+    if item.answerable:
+        out["context_hit"] = first_hit_rank(sent, item.evidence) is not None
+        if item.key_facts:
+            found_facts = [f for f in item.key_facts if contains(ctx.text, f)]
+            out["context_key_facts"] = round(len(found_facts) / len(item.key_facts), 3)
+    return out
+
+
+def context_summary(rows: list[dict]) -> dict:
+    answerable = [r for r in rows if r["answerable"]]
+    with_facts = [r for r in answerable if "context_key_facts" in r]
+    tokens = [r["context_tokens"] for r in rows]
+    return {
+        "n": len(answerable),
+        "hit": round(sum(r["context_hit"] for r in answerable) / len(answerable), 3) if answerable else None,
+        "key_facts_all": round(sum(r["context_key_facts"] == 1 for r in with_facts) / len(with_facts), 3) if with_facts else None,
+        "key_facts_mean": round(sum(r["context_key_facts"] for r in with_facts) / len(with_facts), 3) if with_facts else None,
+        "tokens_median": percentile(tokens, 50), "tokens_p95": percentile(tokens, 95),
+        "misses": [r["id"] for r in answerable if not r["context_hit"]],
+        "incomplete": [r["id"] for r in with_facts if r["context_key_facts"] < 1],
+    }
 
 
 def items(holdout: bool = False):
@@ -85,6 +115,7 @@ def main() -> None:
             "brand_ok": sorted(found.filters.brands) == sorted(expected_brands),
             "regulatory_results": sum(r.content_type == "regulatory" for r in results),
             "search_ms": found.timings_ms.get("total"),
+            **context_checks(settings, found.results, item),
             "top": [[r.chunk_id, r.document_id, r.page_start, r.page_end, r.score] for r in results],
         }
         if item.answerable and not hit_at(row["rank"], 5) and item.key_facts:
@@ -115,6 +146,7 @@ def main() -> None:
         "by_category": by_category,
         "brand_accuracy": round(sum(r["brand_ok"] for r in rows) / len(rows), 3),
         "regulatory_leakage": sum(r["regulatory_results"] for r in rows),
+        "context": context_summary([r for r in rows if r["source"] == "question"]),
         "search_ms": {"median": percentile([r["search_ms"] for r in rows], 50),
                       "p95": percentile([r["search_ms"] for r in rows], 95)},
         "no_brand_coverage@5": {r["id"]: f"{len(r['manuals_found@5'])}/{r['manuals_with_evidence']}"
@@ -151,6 +183,10 @@ def main() -> None:
         md_table(["category", "items", "answerable", *ks, "MRR", "brand filter"], table),
         "",
         f"Regulatory chunks in results: {summary['regulatory_leakage']} (should be 0)",
+        "",
+        f"What reaches the LLM (first {settings.top_k} results within {settings.context_max_tokens} tokens), all questions: "
+        f"evidence in context {pct(summary['context']['hit'])}, all key facts in context {pct(summary['context']['key_facts_all'])}, "
+        f"context tokens median {summary['context']['tokens_median']}, p95 {summary['context']['tokens_p95']}",
         "",
         f"Hit@5 95% confidence interval (all questions): {pct(o['hit@5_ci95'][0])}-{pct(o['hit@5_ci95'][1])} | "
         f"search time median {summary['search_ms']['median']:.0f} ms, p95 {summary['search_ms']['p95']:.0f} ms",
