@@ -315,3 +315,8 @@ gave the same result in all 3 runs, except c-dl-01 (✗✓✗, a judge mistake).
 - The judge's mistakes all involve manuals that contradict themselves or use odd menu paths. The judge's
   validation (12/12 planted errors caught, kappa 0.86) still holds, but its "not grounded" verdicts are
   checked by hand before being counted as failures.
+
+**Accepted accuracy for R2a: 93% (68 of 73 items, 95% interval about 85–97%).** The human reviewer accepted
+the four items above as correct: c-dl-01 runs 1 and 3 and cv-05-1 (judge mistakes) and p-dl-01 (strict
+label). The automatic score was 88%. By type: standalone questions 38/40 (95%), conversation turns 10/13
+(77%). Remaining failures to fix: p-te-01, p-as-02, cv-04-1, cv-04-2, cv-02-2.
