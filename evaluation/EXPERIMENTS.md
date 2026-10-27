@@ -31,7 +31,7 @@ final configuration.
 | R1a | chunks 200/40 | 47% | 84% | 91% | 0.64 | +4 / −2 | – | – | rejected: tables 80%→60%, t-ng-01 and d-tp-02 lost, slower search (83 ms) |
 | R1b | chunks 350/0 | 47% | 81% | 94% | 0.61 | +2 / −1 | – | – | rejected: within noise, lower MRR |
 | R1c | **chunks 500/60** | **62%** | **88%** | 94% | **0.74** | **+4 / −0** | pending | pending | **base for R2–R4**; answer run to confirm |
-| R2a | **500/60 + contextual headers** (vs R1c) | **84%** | **94%** | 94% | **0.88** | **+2 / −0** vs R1c | pending | pending | **kept**: best so far; answer run to confirm |
+| R2a | **500/60 + contextual headers** (vs R1c) | **84%** | **94%** | 94% | **0.88** | **+2 / −0** vs R1c | **88%** (78–93%) | **0** | **kept: confirmed by the paid answer run** |
 | R2b | 350/60 + contextual headers (vs baseline) | 66% | 94% | 94% | 0.77 | +6 / −0 vs baseline | – | – | confirms R2a: the header effect does not depend on chunk size |
 | R3a | 500/60 + headers **+ hybrid search** (vs R2a) | 84% | 94% | 94% | 0.89 | +1 / −0 vs R2a | – | – | **rejected**: below the agreed bar; dependency not adopted |
 | R3b | 350/60 + hybrid search (vs baseline) | 56% | 91% | 91% | 0.70 | +5 / −0 vs baseline | – | – | helps on its own, but less than headers (R2b) |
@@ -274,3 +274,44 @@ not.
 - **Kept on the main branch:** the "what reaches the LLM" measures (evidence in context, all key facts in
   context, context tokens), which apply to any strategy. **Clean-up:** the P1 code stays on its branch
   only, and the four P1 collections were deleted.
+
+## Answer run on the current best (R2a: 500/60 + contextual headers)
+
+Run on the same protocol as the Step 11 baseline (40 questions + 6 conversations, 3 runs for tables and
+context confusion), on the main branch. Estimated at most $0.62; actual cost $0.53. Run folder:
+`evaluation/results/20261027-161627_rag_500_60_ctx_generation_r2a`.
+
+| | Baseline (Step 11) | R2a | Change |
+|---|---|---|---|
+| **Accuracy, all 73 items** | 75% (64–84%) | **88% (78–93%)** | +12 pts |
+| Question runs | 78% | 92% | +13 pts |
+| Key facts in answers | 75% | 94% | +19 pts |
+| **False answers** | 0 | **0** | – |
+| False refusals | 10 | 2 | −8 |
+| Refusal precision / recall | 44% / 100% | 80% / 100% | |
+| Conversation turns passed | 62% | 69% | |
+| Chat time median / p95 | 5.4 s / 11.7 s | 4.5 s / 8.4 s | faster |
+
+**Flips:** 11 fixed, 2 "broken". The fixed ones are c-as-01 ×3, cv-01-2, d-dl-01, d-tp-02, p-as-01, p-dl-02 and
+t-te-01 ×3. The 2 broken are both judge mistakes (below), so in reality 0 broke. Every repeated question
+gave the same result in all 3 runs, except c-dl-01 (✗✓✗, a judge mistake).
+
+**The 9 failed items, read one by one:**
+
+| Item | Category | Cause |
+|---|---|---|
+| p-te-01, p-as-02 | retrieval | wording gap (evidence ranks 1st with the manual's words, ~100th with the user's) |
+| cv-04-1, cv-04-2 | retrieval | "highest priority" does not retrieve the QoS Engine page; the follow-up inherits the miss |
+| cv-02-2 | rewrite / generation | the follow-up was rewritten literally ("Can a URL filter … block FTP?"); the Network Services Filter page was in the context, but the model refused |
+| c-dl-01 runs 1 and 3 | **judge mistake** | the answer is the manual's own Windows 10 instruction (p. 125), whose menu path itself mixes Windows 7 and 10; the judge called it a hybrid. Run 2 of the same answer was judged grounded |
+| cv-05-1 | **judge mistake** | the manual says 5 s (p. 109) and 7 s (p. 158); the answer gives both with correct citations (already graded "grounded" by the human reviewer in Step 11) |
+| p-dl-01 | **strict label** | "Can I control my D-Link router by talking to Alexa?" was answered "yes" with the voice commands, supported by the sources, but without the setup steps the key facts require (flagged as strict in Step 11) |
+
+**What is working and what needs work:**
+- Counting the three verified judge mistakes as correct, **67 of 73 items (92%)** are correct; with the
+  strict label too, 68 of 73 (93%).
+- **Genuine failures: 5 of 73 items (7%).** Four are retrieval misses with one cause (the wording gap: two
+  questions and one conversation with its follow-up), and one is a literal follow-up rewrite.
+- The judge's mistakes all involve manuals that contradict themselves or use odd menu paths. The judge's
+  validation (12/12 planted errors caught, kappa 0.86) still holds, but its "not grounded" verdicts are
+  checked by hand before being counted as failures.
