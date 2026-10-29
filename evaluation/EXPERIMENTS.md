@@ -5,6 +5,13 @@ set (dataset `4d4be1280743`: 40 questions + 6 conversations) with `scripts/eval_
 held-out set (15 questions, `f2b8451e9083`) is frozen and is only run on the baseline and on the
 final configuration.
 
+The development set's hash became `c03b2b01c65f` on 2026-10-28: the key fact of cv-02-2 now accepts
+both of the manual's spellings, "Network Service Filter" or "Network Services Filter" (see "Fix B"). Runs before
+and after are compared with `eval_compare.py --force`.
+
+**Final configuration (the defaults since Step 12):** `rag_500_60_ctx` (500/60 + contextual headers),
+retrieval fallback on, answer prompt 1.2, answer output limit 1,500 tokens. Results: see "Final results".
+
 ## Rules
 
 1. Change one thing at a time. The free retrieval evaluation screens a change; a paid answer run
@@ -39,6 +46,9 @@ final configuration.
 | R4b | 350/60 + re-ranking (vs baseline) | 66% | 88% | 91% | 0.74 | +4 / −1 vs baseline | – | – | helps on its own, but less than headers and breaks p-tp-02 |
 | P1a | parent-child: children 200/40 + headers, parents 500, 5 sent (vs R2a) | 84% | 91% | 94% | 0.88 | +0 / −1 vs R2a (evidence reaching LLM) | – | – | **rejected**; context confusion Hit@1 100% |
 | P1b | parent-child: parents ~1000, 3 sent (vs R2a) | 84% | 88% | 94% | 0.87 | +0 / −2 vs R2a | – | – | **rejected**: tables 80%, +21% context tokens |
+| Q1 | search-query rewriting on every question, prompt 1.0 (vs R2a) | 78–84% | 91% | – | – | +0 / −1 (p-dl-02) | – | – | **rejected** (branch `q1-query-rewrite`): rewrites kept the user's words; broke a working question |
+| F1 | R2a **+ retrieval fallback after a refusal** | – | – | – | – | 4 of 4 wording-gap failures recovered | **93%** automatic | **0** | **kept** (below) |
+| F2 | F1 + output limit 1,500 + **answer prompt 1.2** | – | – | – | – | nb-02, cv-02-2 fixed | **94%** automatic, **100%** accepted | **0** | **kept: final** (below) |
 
 ### R1: chunk size and overlap
 
@@ -320,3 +330,167 @@ gave the same result in all 3 runs, except c-dl-01 (✗✓✗, a judge mistake).
 the four items above as correct: c-dl-01 runs 1 and 3 and cv-05-1 (judge mistakes) and p-dl-01 (strict
 label). The automatic score was 88%. By type: standalone questions 38/40 (95%), conversation turns 10/13
 (77%). Remaining failures to fix: p-te-01, p-as-02, cv-04-1, cv-04-2, cv-02-2.
+
+## F1: retrieval fallback after a refusal (fixes the wording gap)
+
+**Idea** (from the mentor's suggestion of an LLM layer that knows the manuals' vocabulary): the normal
+pipeline runs first. Only when the answer is a refusal (or search returns nothing), an LLM that is given
+the manuals' own feature names writes alternative searches, and the answer model gets **one** more
+attempt at the **original** question. Answered questions never enter it, so they cannot be changed by it.
+
+**Design** (`app/services/retrieval_fallback.py`, `app/services/manual_glossary.py`, setting `RETRIEVAL_FALLBACK`):
+- **Glossary:** every heading of every manual's table of contents (`documents/glossary.json`, built by
+  `scripts/build_glossary.py`; 77–186 headings per manual, about 340–1,500 tokens for one brand). Nothing in it
+  was chosen for particular questions.
+- **One call** to the rewrite model (`grok-4.20-0309-non-reasoning`) writes 3 alternative queries. It gets the
+  question (the standalone rewrite for follow-ups) and the glossary of the detected brand (all manuals if none).
+- **Safeguards per alternative** (it is dropped if any fails):
+  - it may not name a brand the question does not name;
+  - the question's technical terms (anything with a digit or two capitals: "AiMesh", "6 GHz", "OpenVPN") must
+    survive, so an unsupported feature is never swapped for a supported one;
+  - brand and model names are exempt from that check (this was Q1's flaw);
+  - an off-topic question gets no alternatives, at no extra cost.
+- **Search:** the original question plus each alternative, with the **original** brand filter, merged by
+  reciprocal rank fusion (fixed before testing). Then one more answer to the original question. **No loop:** a
+  second refusal is final.
+- **Why refusal is the trigger:** in the R2a run, all 4 wording-gap failures ended in a refusal and no answered
+  question did. A score threshold was not used, because right and wrong chunks score too close together.
+
+**Probes** (`evaluation/fallback_probes.jsonl`, a separate file outside the dev hash): 11 questions about features a
+manual does not have but that sound like ones it does. They cover lookalike pages, brand-mixing traps and real-world
+features absent from the manual, and 6 are in everyday wording. Each feature was checked absent from its manual.
+pr-as-02 ("check how fast my internet is" on ASUS) was **relabelled answerable** after the first run: p. 54 says the
+traffic monitor shows the "speed of your Internet". The absence check had searched for "internet speed".
+
+**Rule B** (reviewer's decision): an answer to an unanswerable question is correct if it:
+1. says the asked feature is not in the manual;
+2. gives a related feature from the same brand's manual, cited;
+3. does not present that feature as doing what was asked.
+
+It is a scoring rule, not an instruction to the model. Such answers are listed under "Review under rule B" in
+`summary.md` and count as false answers until reviewed.
+
+**Targeted run** (`…150627_…fb_targeted`, `…150900_…fb_probes`, about $0.24). Bar agreed before the run:
+at least 3 of 4 recovered, no false answers, passing turns unchanged.
+
+| Item | Alternatives written | Evidence rank after | Result |
+|---|---|---|---|
+| p-te-01 | "Client management: Add a client to the blacklist", … | 2 | answered correctly |
+| p-as-02 | "Wireless MAC Filter", … | 1 | answered correctly |
+| cv-04-1 | "QoS Engine", "Settings QoS Engine", … | 1 | answered correctly |
+| cv-04-2 | "Connected Clients", "QoS Engine", … | 2 | answered correctly |
+
+All 9 unanswerable and out-of-scope items were refused again. The term check rejected alternatives that dropped
+"OpenWrt", "MLO", "6 GHz", "OpenVPN", "AiMesh" and "USB". In the probes, all 10 unanswerable questions were refused.
+
+**Full run with F1** (`…152747_…fb_full`, about $0.59): automatic **93%** (68/73, 85–97%), 0 false answers,
+**0 false refusals** (R2a: 2). The fallback ran on 12 items and turned 3 into answers; the other 9 were correct
+refusals and stayed refusals. Latency rose (median 7.8 s), but items without the fallback rose equally, because
+xAI's generation was slower that day (median 4.3 s → 7.2 s).
+
+### Answer truncation found (nb-02) and fixed
+
+nb-02 ("How do I set up port forwarding?", no brand) is answered for 3 manuals. It hit the **800-token output
+limit in every run, R2a included**, so its answers ended mid-sentence. No check caught it: the key facts come early,
+and the judge does not check completeness.
+
+Fixes:
+- `LLM_MAX_OUTPUT_TOKENS` raised from 800 to **1,500**. nb-02 answers are now 989–1,363 tokens, complete in 3 of 3 runs.
+- A `truncated_answer` warning when the model stops at the limit, which the evaluation counts as a failure.
+
+No other answer in any run reached 700 tokens.
+
+### Fix B: answer prompt 1.2 (cv-02-2)
+
+cv-02-2 ("Can it [the URL filter] also block a whole service like FTP?") had the Network Services Filter page at
+**rank 1 in every run**, with the same rewrite. Even so, the model answered 3 times out of 5 and refused twice
+(repeat runs `…cv02_rep*`). The fallback could not help, because the evidence was already retrieved.
+
+Prompt 1.2 adds rule 8: *if the question asks whether a named feature can do something, and the sources show it
+cannot but a different feature of the same router does exactly what is asked, say so and answer with that
+feature, cited. If no feature does it, give the exact not-found reply.* The rule is deliberately narrow: loosely
+related features (e.g. Tenda's Bandwidth Control for a priority question) still get a refusal.
+
+| Check (with F1) | Before | Prompt 1.2 |
+|---|---|---|
+| cv-02 conversation × 5 | cv-02-2 3/5 | **5/5** |
+| 11 probes | 11/11 (after relabel) | **11/11**, 0 false answers |
+| Full run (`…170113_…p12_full`, about $0.62) | 93% automatic | **94% automatic (69/73, 87–98%)**, 0 false answers, 0 false refusals, conversation turns 92%, chat median 5.5 s, p95 11.6 s |
+
+Two items flipped to failure in the full run: p-dl-01 and p-dl-02, answered "Yes, feature X does it" without
+steps. Repeats under **both** prompts gave the same rate (p-dl-01 0/3 and p-dl-02 1/3, under 1.1 and under 1.2),
+so prompt 1.2 did not cause them. They follow rule 7 ("answer only the question asked") and were accepted.
+
+## Final results
+
+**Accepted items** (reviewer's decisions; each answer read by hand):
+
+| Item | Failed by | Why accepted |
+|---|---|---|
+| p-dl-01, p-dl-02, h-p-te-01 | key facts (no setup steps) | "Can it…?" answered "yes, feature X does it", correct and cited; rule 7 keeps answers to the question asked |
+| c-dl-01 run 2 | judge | copies the manual's own Windows 10 menu path, which mixes Windows 7 and 10 (p. 125) |
+| cv-05-1 | judge | the manual itself says 5 s (p. 109) and 7 s (p. 158); both are given with citations |
+
+(nb-02 in the F1 run is not in this table: the judge's specific complaint was wrong, because every flagged sentence
+is word for word in source [1], but the answer was truncated and counted as a failure. It was fixed as above.)
+
+| | Step 11 baseline | R2a | **Final** |
+|---|---|---|---|
+| Dev set, automatic | 75% | 88% | **94% (69/73)** |
+| Dev set, accepted | – | 93% (68/73) | **100% (73/73)** |
+| **Held-out (15 questions, 23 runs)**, automatic | **100% (23/23)** | – | **91% (21/23)** |
+| Held-out, accepted | 100% | – | **96% (22/23)** |
+| False answers (every set, probes included) | 0 | 0 | **0** |
+
+**Held-out runs.** Each setup was run once:
+- **Baseline:** `…233318_rag_350_60_generation_holdout_final_baseline`, run from commit f8e820c in a separate
+  worktree with the Step 11 settings. 4 calls hit xAI's rate limit and were rerun once with the same setup
+  (`…233719_…retry`).
+- **Final:** `…233903_rag_500_60_ctx_generation_holdout_final`.
+- About $0.32 for both.
+
+What they show:
+- **On unseen questions, the final configuration shows no gain over the baseline** and lost one question. That is
+  within the margin: one run is about 4 points of 23. The held-out questions were already easy for the baseline;
+  the Step 12 gains are on the failures diagnosed on the dev set (the wording gap, truncation and the URL-filter
+  follow-up).
+- **h-p-ng-01 failed (a false refusal) and is a known limitation.** It was not fixed, because it was found on the
+  held-out set.
+  - **The question:** "My home IP address keeps changing. Can I reach my Netgear router from outside using a name
+    instead?"
+  - **What happened:** the first search missed the Dynamic DNS page; 500/60 ranks it below 5, while the baseline had
+    it at rank 5. The fallback wrote the right searches ("Set up and manage Dynamic DNS", …), but the term check
+    rejected all three for dropping "IP", which it treats as a protected term because of its two capitals.
+  - **Proposed fix (future work):** treat common networking words (IP, DNS, LAN, WAN, MAC, USB) as ordinary words,
+    then re-test that real feature names stay protected.
+
+**Cost of this work** (F1, truncation fix, prompt 1.2, repeats, held-out): about $2.30.
+
+## Exploratory tests (no changes made)
+
+- **Negatively worded questions: 13/13 correct.** Examples: "I don't want the lights on my TP-Link to stay on at
+  night", "Can't I reset my Netgear without the button?", "Is it not possible to not use WPS?".
+  - Search found the same page as the positive wording, and the model resolved the negation.
+  - Leading questions ("Doesn't the AX55 support 6 GHz?", "Isn't there an OpenVPN server?") were still refused.
+  - One reply to "Is there no way…?" began "No, there is a way", which is logical but easy to misread.
+- **Opposite actions on different pages: 5/5 correct.** Examples: remove from the blacklist vs add, separate vs unify
+  bands, delete keywords vs block by keyword.
+  - Search ranked the "opposite" section first in 4 of 5.
+  - In 4 cases both procedures were in the same chunk, because manuals put "add X" and "remove X" side by side.
+  - The one true test (Netgear keywords: the opposite at rank 1, the correct procedure at rank 2 in a separate
+    chunk) was answered from the correct chunk.
+
+## Known limitations
+
+1. **The fallback only triggers on a refusal.** An answer built on wrong-but-similar pages does not trigger it. None
+   was seen in any run.
+2. **The term check is too strict for common abbreviations** ("IP" in h-p-ng-01 above) and **does not protect plain
+   capitalised names** such as "Alexa". Only the prompt rule protects those, and the Alexa probes were refused.
+3. **"Can it…?" questions** may be answered with the feature and no steps (rule 7). The user can then ask "how?".
+4. **Loosely related features are not offered.** Prompt rule 8 is deliberately narrow, so such questions get the
+   not-found reply.
+5. **Refusals take longer** with the fallback, because of one more search and answer: about 1–4 s more, longer when
+   xAI is slow.
+6. **Icons in procedures are lost** in the PDF text ("click [icon] under Network Topology").
+7. **The judge misreads** manuals that contradict themselves, and procedures split across chunks. Its "not grounded"
+   verdicts are checked by hand.

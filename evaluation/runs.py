@@ -12,8 +12,10 @@ from datetime import datetime
 from pathlib import Path
 
 from app.core.config import Settings
+from app.services.manual_glossary import GLOSSARY_VERSION
 from app.services.prompts import PROMPT_VERSION
 from app.services.query_rewriter import REWRITE_PROMPT_VERSION
+from app.services.retrieval_fallback import FALLBACK_PROMPT_VERSION
 from app.services.text_cleaner import CLEANER_VERSION
 from evaluation.dataset import HOLDOUT_FILE, dataset_hash
 
@@ -50,6 +52,10 @@ def run_config(settings: Settings, kind: str, holdout: bool = False, **extra) ->
         "answer_model": settings.xai_chat_model,
         "rewrite_model": settings.xai_rewrite_model,
         "temperature": settings.llm_temperature,
+        "retrieval_fallback": settings.retrieval_fallback,
+        **({"fallback_prompt_version": FALLBACK_PROMPT_VERSION, "glossary_version": GLOSSARY_VERSION,
+            "fallback_queries": settings.fallback_queries, "fallback_merge": settings.fallback_merge}
+           if settings.retrieval_fallback else {}),
         **extra,
     }
 

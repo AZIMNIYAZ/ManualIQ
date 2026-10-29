@@ -211,6 +211,17 @@ def test_refusal_policy():
     assert score_answer(item, "refuse", "I couldn't find this.", True, None, ALIASES)["outcome"] == "correct_refusal"
     s = score_answer(item, "refuse", "Enable WPA4 under Security [1].", False, verdict(), ALIASES)
     assert s["outcome"] == "false_answer" and not s["pass"]
+    assert s["review_rule_b"]  # a reviewer may still accept it under rule B
+    assert not score_answer(item, "refuse", "I couldn't find this.", True, None, ALIASES)["review_rule_b"]
+    assert score_answer(item, "refuse", "Enable WPA4 [1]. Then", False, verdict(), ALIASES, truncated=True)["outcome"]         == "false_answer"  # cut off, but still a false answer
+
+
+def test_truncated_answer_fails():
+    item = q()
+    full = "Select ADVANCED > Advanced Setup > Port Forwarding/Port Triggering [1]."
+    assert score_answer(item, "single_brand", full, False, verdict(), ALIASES)["pass"]
+    s = score_answer(item, "single_brand", full, False, verdict(), ALIASES, truncated=True)
+    assert s["outcome"] == "truncated" and not s["pass"]
 
 
 def test_per_brand_policy_never_rewards_mixing_or_only_asking():
@@ -276,6 +287,10 @@ def test_cost_estimate():
     assert e["output_tokens"] == 10 * 500 + 2 * 50 + 10 * 250
     assert e["cost_usd"] == round((e["input_tokens"] * 2 + e["output_tokens"] * 10) / 1e6, 4)
     assert estimate(1, 0, 0, per_call, None, None)["cost_usd"] is None
+    f = estimate(10, 2, 10, per_call, 2.0, 10.0, n_fallback=4)  # one query call + one more answer each
+    assert f["input_tokens"] == e["input_tokens"] + 4 * (2200 + 2000)
+    assert f["output_tokens"] == e["output_tokens"] + 4 * (80 + 500)
+    assert (f["answer_calls"], f["fallback_calls"]) == (14, 4)
 
 
 def test_turn_needs_expected_query_for_follow_ups():

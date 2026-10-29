@@ -11,7 +11,8 @@ def make_settings(**overrides) -> Settings:
 
 def test_defaults_are_valid():
     s = make_settings()
-    assert s.chunk_size == 350 and s.chunk_overlap == 60 and s.embedding_dim == 384
+    assert s.chunk_size == 500 and s.chunk_overlap == 60 and s.embedding_dim == 384
+    assert s.contextual_headers and s.retrieval_fallback  # the Step 12 final setup
 
 
 def test_chunk_size_above_500_rejected():

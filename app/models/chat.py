@@ -56,6 +56,18 @@ class RewriteInfo(BaseModel):
     output_tokens: int = 0
 
 
+class FallbackInfo(BaseModel):
+    """The retrieval fallback ran (the first answer was a refusal)."""
+    prompt_version: str
+    model: str | None  # the model that wrote the alternative queries
+    queries: list[str]  # alternatives searched (with the original question)
+    rejected: list[list[str]] = []  # [query, reason] dropped by the safeguards
+    error: str | None = None
+    input_tokens: int = 0  # the query-writing call; the second answer is in llm
+    output_tokens: int = 0
+    answered: bool  # the second attempt was not a refusal
+
+
 class ChatResponse(BaseModel):
     session_id: str
     answer: str
@@ -67,6 +79,7 @@ class ChatResponse(BaseModel):
     rewritten_query: str | None = None  # the standalone question searched (None: the message itself)
     history_used: int = 0  # previous messages given to the rewriter (0: new or expired session)
     rewrite: RewriteInfo | None = None  # None when no rewrite call was made
+    fallback: FallbackInfo | None = None  # None when the retrieval fallback did not run
     timings_ms: dict[str, float]
     context: str | None = None  # debug only
     retrieved: list[ChatSource] | None = None  # debug only: every chunk sent to the LLM

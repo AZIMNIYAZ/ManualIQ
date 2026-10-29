@@ -20,7 +20,8 @@ from evaluation.metrics import asks_which_router, brands_named, key_facts, viola
 
 
 def score_answer(item: Item, policy: str, answer: str, refused: bool, verdict: JudgeVerdict | None,
-                 aliases: AliasTable) -> dict:
+                 aliases: AliasTable, truncated: bool = False) -> dict:
+    """truncated: the answer stopped at the output token limit (always a fail: it ends mid-sentence)."""
     named = brands_named(answer, aliases) if not refused else []
     asked = (not refused) and asks_which_router(answer)
     if refused:
@@ -32,6 +33,9 @@ def score_answer(item: Item, policy: str, answer: str, refused: bool, verdict: J
     mixing = verdict.brand_mixing if verdict else None
 
     if not item.answerable:
+        # Automatic rule: anything but a refusal is a false answer. Since Step 12 a reviewer may
+        # accept it under rule B (says the feature is not in the manual + a related, cited,
+        # same-brand feature, not presented as doing what was asked): see review_rule_b.
         outcome = "correct_refusal" if refused else "false_answer"
         passed = refused
     elif refused:
@@ -42,6 +46,8 @@ def score_answer(item: Item, policy: str, answer: str, refused: bool, verdict: J
     else:
         outcome = "answered"
         passed = not missing and not bad and grounded is not False and mixing is not True
+    if truncated and not refused and item.answerable:  # an unanswerable one stays a false_answer
+        outcome, passed = "truncated", False
 
     return {
         "outcome": outcome,
@@ -56,6 +62,7 @@ def score_answer(item: Item, policy: str, answer: str, refused: bool, verdict: J
         "grounded": grounded,
         "citations_correct": verdict.citations_correct if verdict else None,
         "brand_mixing": mixing,
+        "review_rule_b": not item.answerable and not refused,
     }
 
 
@@ -84,18 +91,22 @@ DEFAULT_TOKENS = {  # per call, used when the API log has no measurements yet
     "answer_in": 2600, "answer_out": 250, "reasoning": 300, "rewrite_in": 700, "rewrite_out": 40,
 }
 JUDGE_EXTRA_INPUT = 700  # judge prompt + the answer, on top of the same context
+FALLBACK_QUERY_TOKENS = (2200, 80)  # glossary (up to ~1,500 tokens for one brand) + question; 3 queries
 
 
 def estimate(n_answers: int, n_rewrites: int, n_judge: int, per_call: dict, price_in: float | None,
-             price_out: float | None) -> dict:
+             price_out: float | None, n_fallback: int = 0) -> dict:
     """Upper-bound token and cost estimate. Judge calls are counted for every answer, although
-    refusals are not judged. One price pair is applied to all models (check xAI's pricing)."""
+    refusals are not judged. n_fallback: answers that may trigger the retrieval fallback (one
+    query-writing call + one more answer each). One price pair is applied to all models."""
     tokens_in = (n_answers * per_call["answer_in"] + n_rewrites * per_call["rewrite_in"]
-                 + n_judge * (per_call["answer_in"] + JUDGE_EXTRA_INPUT))
+                 + n_judge * (per_call["answer_in"] + JUDGE_EXTRA_INPUT)
+                 + n_fallback * (FALLBACK_QUERY_TOKENS[0] + per_call["answer_in"]))
     tokens_out = (n_answers * (per_call["answer_out"] + per_call["reasoning"]) + n_rewrites * per_call["rewrite_out"]
-                  + n_judge * 250)
+                  + n_judge * 250
+                  + n_fallback * (FALLBACK_QUERY_TOKENS[1] + per_call["answer_out"] + per_call["reasoning"]))
     cost = None
     if price_in is not None and price_out is not None:
         cost = round((tokens_in * price_in + tokens_out * price_out) / 1e6, 4)
-    return {"answer_calls": n_answers, "rewrite_calls": n_rewrites, "judge_calls": n_judge,
-            "input_tokens": tokens_in, "output_tokens": tokens_out, "cost_usd": cost}
+    return {"answer_calls": n_answers + n_fallback, "rewrite_calls": n_rewrites, "judge_calls": n_judge,
+            "fallback_calls": n_fallback, "input_tokens": tokens_in, "output_tokens": tokens_out, "cost_usd": cost}

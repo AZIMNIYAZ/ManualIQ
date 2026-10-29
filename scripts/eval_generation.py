@@ -46,7 +46,7 @@ from app.services.generation_service import (GenerationError, GenerationNotConfi
 from app.services.ingestion_service import point_id  # noqa: E402
 from app.services.session_service import SessionStore  # noqa: E402
 from evaluation.dataset import (HOLDOUT_FILE, QUESTIONS_FILE, REPEAT_CATEGORIES, confirm_holdout,  # noqa: E402
-                                load_conversations, load_questions)
+                                dataset_hash, load_conversations, load_questions)
 from evaluation.judge import JUDGE_MAX_OUTPUT_TOKENS, JUDGE_PROMPT_VERSION, JudgeError, judge  # noqa: E402
 from evaluation.metrics import Retrieved, first_hit_rank, percentile, refusal_counts, wilson  # noqa: E402
 from evaluation.runs import (JsonlWriter, md_table, new_run_dir, pct, read_jsonl, require_collection,  # noqa: E402
@@ -59,7 +59,9 @@ CATEGORY_ORDER = ["direct", "paraphrased", "no_brand", "tables", "context_confus
 # ------------------------------------------------------------------ planning
 
 def select_questions(args) -> list:
-    questions = load_questions(HOLDOUT_FILE if args.holdout else QUESTIONS_FILE)
+    if args.conversations and not (args.ids or args.questions_file):  # conversations only
+        return []
+    questions = load_questions(args.questions_file or (HOLDOUT_FILE if args.holdout else QUESTIONS_FILE))
     if args.ids:
         wanted = set(args.ids.split(","))
         questions = [q for q in questions if q.id in wanted]
@@ -77,7 +79,11 @@ def select_questions(args) -> list:
 
 
 def select_conversations(args) -> list:
-    if args.holdout or args.no_conversations or args.ids or (args.category and args.category != "conversation"):
+    if args.conversations:  # explicit ids win over the other filters
+        wanted = set(args.conversations.split(","))
+        return [c for c in load_conversations() if c.id in wanted]
+    if (args.holdout or args.questions_file or args.no_conversations or args.ids
+            or (args.category and args.category != "conversation")):
         return []
     conversations = load_conversations()
     return conversations[:1] if args.limit else conversations
@@ -130,10 +136,11 @@ def fetch_chunks(client, settings, chunk_ids: list[str]) -> list[Retrieved]:
 
 def run_one(ctx, item, policy: str, message: str, session_id: str | None, use_sessions: bool) -> dict:
     s = ctx["settings"]
+    # The rewriter is always passed, as the API does: without sessions there is no history, so no
+    # rewrite call is made, but the retrieval fallback (when enabled) needs it
     response = answer(ctx["client"], ctx["embedder"], ctx["generator"], s,
                       ChatRequest(message=message, session_id=session_id, debug=True), ctx["aliases"],
-                      sessions=ctx["store"] if use_sessions else None,
-                      rewriter=ctx["rewriter"] if use_sessions else None)
+                      sessions=ctx["store"] if use_sessions else None, rewriter=ctx["rewriter"])
     retrieved = fetch_chunks(ctx["client"], s, [r.chunk_id for r in response.retrieved or []])
     refused = not response.found_in_documents
     verdict, judge_usage, judge_error = None, None, None
@@ -158,12 +165,14 @@ def run_one(ctx, item, policy: str, message: str, session_id: str | None, use_se
         "context": response.context,
         "llm": response.llm.model_dump(),
         "rewrite_tokens": response.rewrite.model_dump() if response.rewrite else None,
+        "fallback": response.fallback.model_dump() if response.fallback else None,
         "timings_ms": response.timings_ms,
         "judge": verdict.model_dump() if verdict else None,
         "judge_usage": judge_usage,
         "judge_error": judge_error,
     }
-    row["score"] = score_answer(item, policy, response.answer, refused, verdict, ctx["aliases"])
+    row["score"] = score_answer(item, policy, response.answer, refused, verdict, ctx["aliases"],
+                                truncated="truncated_answer" in row["warnings"])
     return row
 
 
@@ -221,6 +230,10 @@ def summarise(rows: list[dict]) -> dict:
         if r.get("judge_usage"):
             tokens["judge_in"] += r["judge_usage"]["input_tokens"]
             tokens["judge_out"] += r["judge_usage"]["output_tokens"] + r["judge_usage"]["reasoning_tokens"]
+        if r.get("fallback"):
+            tokens["fallback_in"] += r["fallback"]["input_tokens"]
+            tokens["fallback_out"] += r["fallback"]["output_tokens"]
+    fb = [r for r in ok if r.get("fallback")]
     return {
         "items": len(rows), "errors": sum(bool(r.get("error")) for r in rows),
         "judge_errors": sum(bool(r.get("judge_error")) for r in ok),
@@ -253,6 +266,13 @@ def summarise(rows: list[dict]) -> dict:
                     "p95": percentile([r["timings_ms"]["total"] for r in ok], 95)},
         "tokens": dict(tokens),
         "generate_ms_median": statistics.median([r["timings_ms"]["generate"] for r in ok]) if ok else None,
+        # Step 12 retrieval fallback: which items it ran on, and which it turned into answers
+        "fallback": {"ran": [f"{r['id']}#{r['run']}" for r in fb],
+                     "answered": [f"{r['id']}#{r['run']}" for r in fb if r["fallback"]["answered"]],
+                     "no_alternatives": [f"{r['id']}#{r['run']}" for r in fb if not r["fallback"]["queries"]],
+                     "ms_median": percentile([r["timings_ms"].get("fallback", 0) for r in fb], 50) if fb else None},
+        # Answers to unanswerable questions: false answers by the automatic rule, a reviewer may accept under rule B
+        "rule_b_review": [f"{r['id']}#{r['run']}" for r in ok if r["score"].get("review_rule_b")],
     }
 
 
@@ -333,10 +353,32 @@ def write_markdown(run_dir: Path, config: dict, summary: dict, rows: list[dict])
             if s["brand_mixing"]:
                 why.append("judge: brand mixing")
             lines.append(f"- **{r['id']}** run {r['run']} (Hit@5 {'yes' if r['rank'] else 'no'}): {'; '.join(why)}")
+    fb = summary.get("fallback") or {}
+    if fb.get("ran"):
+        lines += ["", "## Retrieval fallback", "",
+                  f"Ran on {len(fb['ran'])} items (first answer a refusal), turned {len(fb['answered'])} into answers, "
+                  f"{len(fb['no_alternatives'])} had no usable alternative; median {fb['ms_median'] or 0:.0f} ms.", ""]
+        for r in rows:
+            if r.get("fallback"):
+                f = r["fallback"]
+                lines.append(f"- {r['id']} {mark(r)} {'answered' if f['answered'] else 'refused again'} "
+                             f"(Hit@5 {'yes' if r['rank'] else 'no' if r['answerable'] else '-'}): "
+                             + "; ".join(repr(q) for q in f["queries"])
+                             + (f" | rejected: {f['rejected']}" if f["rejected"] else "")
+                             + (f" | error: {f['error']}" if f["error"] else ""))
+    if summary.get("rule_b_review"):
+        lines += ["", "## Review under rule B (answers to unanswerable questions)", "",
+                  "Counted as false answers above. Correct only if the answer (1) says the asked feature is not in the "
+                  "manual, (2) gives a related feature from the same brand's manual, cited, and (3) does not present it "
+                  "as doing what was asked.", ""]
+        for r in rows:
+            if not r.get("error") and r["score"].get("review_rule_b"):
+                lines += [f"**{r['id']}** run {r['run']}: {r['question']}", "", "> " + r["answer"].replace("\n", "\n> "), ""]
     t = summary["tokens"]
     lines += ["", "## Usage", "",
               f"Tokens: answer in {t.get('answer_in', 0)}, out {t.get('answer_out', 0)}, reasoning {t.get('reasoning', 0)}; "
-              f"rewrite in {t.get('rewrite_in', 0)}, out {t.get('rewrite_out', 0)}; judge in {t.get('judge_in', 0)}, "
+              f"rewrite in {t.get('rewrite_in', 0)}, out {t.get('rewrite_out', 0)}; fallback queries in "
+              f"{t.get('fallback_in', 0)}, out {t.get('fallback_out', 0)}; judge in {t.get('judge_in', 0)}, "
               f"out {t.get('judge_out', 0)}. Median generation {summary['generate_ms_median']:.0f} ms."
               if summary["generate_ms_median"] is not None else "No successful calls."]
     text = "\n".join(lines) + "\n"
@@ -351,6 +393,8 @@ def main() -> None:
     parser.add_argument("--limit", type=int, help="only N questions (mixed categories) + the first conversation")
     parser.add_argument("--category", help="one question category, or 'conversation'")
     parser.add_argument("--ids", help="comma-separated question ids")
+    parser.add_argument("--conversations", help="comma-separated conversation ids (with --ids: both)")
+    parser.add_argument("--questions-file", type=Path, help="another question file, e.g. evaluation/fallback_probes.jsonl")
     parser.add_argument("--repeats", type=int, help="runs for tables/context-confusion questions (default 3)")
     parser.add_argument("--no-conversations", action="store_true")
     parser.add_argument("--no-judge", action="store_true")
@@ -383,11 +427,14 @@ def main() -> None:
     judge_model = args.judge_model or settings.xai_rewrite_model or settings.xai_chat_model
     per_call, source = measured_tokens(settings.log_file)
     est = estimate(n_answers, followups, 0 if args.no_judge else n_answers, per_call,
-                   settings.llm_price_input_per_m, settings.llm_price_output_per_m)
+                   settings.llm_price_input_per_m, settings.llm_price_output_per_m,
+                   n_fallback=n_answers if settings.retrieval_fallback else 0)
 
     print(f"Plan: {len(questions)} questions -> {len(jobs)} answer runs, {len(conversations)} conversations "
-          f"({turns} turns, {followups} rewrites), judge {'off' if args.no_judge else judge_model}")
-    print(f"Calls: {est['answer_calls']} answers, {est['rewrite_calls']} rewrites, up to {est['judge_calls']} judge calls")
+          f"({turns} turns, {followups} rewrites), judge {'off' if args.no_judge else judge_model}, "
+          f"retrieval fallback {'ON' if settings.retrieval_fallback else 'off'}")
+    print(f"Calls: up to {est['answer_calls']} answers, {est['rewrite_calls']} rewrites, up to {est['judge_calls']} "
+          f"judge calls, up to {est['fallback_calls']} fallback query calls (only after a refusal)")
     print(f"Estimated tokens (upper bound, {source}): input {est['input_tokens']:,}, output+reasoning "
           f"{est['output_tokens']:,}")
     if est["cost_usd"] is not None:
@@ -421,7 +468,10 @@ def main() -> None:
     run_dir = new_run_dir(settings, "generation_holdout" if args.holdout else "generation", args.label)
     config = run_config(settings, "generation", holdout=args.holdout, judge_model=None if args.no_judge else judge_model,
                         judge_prompt_version=JUDGE_PROMPT_VERSION, judge_temperature=0.0,
-                        selection={k: v for k, v in vars(args).items() if k not in ("yes",)}, estimate=est)
+                        selection={k: str(v) if isinstance(v, Path) else v for k, v in vars(args).items()
+                                   if k not in ("yes",)}, estimate=est)
+    if args.questions_file:  # its own hash: never comparable with dev-set runs
+        config.update(dataset=args.questions_file.stem, dataset_hash=dataset_hash(args.questions_file))
     write_json(run_dir / "config.json", config)
     out = JsonlWriter(run_dir / "results.jsonl")
     rows: list[dict] = []

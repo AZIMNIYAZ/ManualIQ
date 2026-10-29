@@ -5,6 +5,7 @@ immediately instead of producing silently wrong results later.
 """
 
 from functools import lru_cache
+from typing import Literal
 
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -32,7 +33,7 @@ class Settings(BaseSettings):
     xai_base_url: str = "https://api.x.ai/v1"
     xai_chat_model: str | None = None
     llm_temperature: float = Field(0.1, ge=0, le=2)  # low: consistent, factual answers
-    llm_max_output_tokens: int = Field(800, gt=0)
+    llm_max_output_tokens: int = Field(1500, gt=0)  # 800 cut off long answers covering 3 manuals (Step 12, nb-02)
     llm_timeout_seconds: float = Field(30, gt=0)
     llm_max_retries: int = Field(2, ge=0)  # automatic retries for rate limits / network errors
     # Query rewriting for follow-up questions: a small task, so a fast non-reasoning model
@@ -56,11 +57,11 @@ class Settings(BaseSettings):
     embedding_query_prefix: str = "Represent this sentence for searching relevant passages: "
 
     # Chunking
-    chunk_size: int = Field(350, gt=0, le=MAX_CHUNK_TOKENS)
+    chunk_size: int = Field(500, gt=0, le=MAX_CHUNK_TOKENS)  # Step 12 R1 (Step 11 baseline: 350)
     chunk_overlap: int = Field(60, ge=0)
     # Step 12 R2: embed "Brand Model | Section" + chunk text (stored text unchanged). Off = baseline.
     # A collection built with headers gets the suffix _ctx, so the two can never be mixed.
-    contextual_headers: bool = False
+    contextual_headers: bool = True
 
     # Qdrant
     qdrant_url: str = "http://127.0.0.1:6333"
@@ -82,6 +83,11 @@ class Settings(BaseSettings):
 
     # Retrieval
     top_k: int = Field(5, gt=0)
+    # Step 12: when the answer is a refusal, search again with alternative queries in the
+    # manuals' vocabulary (rewrite model + documents/glossary.json) and answer once more. Off = baseline.
+    retrieval_fallback: bool = True
+    fallback_queries: int = Field(3, ge=1, le=5)
+    fallback_merge: Literal["rrf", "max"] = "rrf"
 
     # Paths
     documents_dir: str = "documents"

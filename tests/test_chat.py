@@ -1,4 +1,5 @@
 import os
+from dataclasses import replace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -121,13 +122,22 @@ def test_answer_returns_only_cited_sources(fake_search):
     assert len(r.retrieved) == 2 and r.context.startswith("[1] Brand: netgear")
     system, user = generator.calls[0]
     assert system == SYSTEM_PROMPT and user.endswith("Question: How do I set up port forwarding on Netgear?")
-    assert r.llm.input_tokens == 1000 and r.llm.prompt_version == "1.1"
+    assert r.llm.input_tokens == 1000 and r.llm.prompt_version == "1.2"
 
 
 def test_not_found_answer_has_no_sources(fake_search):
     fake_search(NETGEAR)
     r = run(FakeGenerator(NOT_FOUND_ANSWER))
     assert not r.found_in_documents and r.sources == [] and r.warnings == []
+
+
+def test_answer_cut_off_at_the_token_limit_is_flagged(fake_search, monkeypatch):
+    fake_search(NETGEAR)
+    generator = FakeGenerator("1. Select ADVANCED > Advanced Setup > Port Forwarding/Port Triggering [1]. 2. Enter the")
+    generate = generator.generate
+    monkeypatch.setattr(generator, "generate", lambda s, u: replace(generate(s, u), finish_reason="length"))
+    r = run(generator)
+    assert {"type": "truncated_answer", "detail": "The answer was cut off at 100 output tokens"} in r.warnings
 
 
 def test_llm_not_called_when_search_finds_nothing(fake_search):

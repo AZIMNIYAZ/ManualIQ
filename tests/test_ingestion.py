@@ -70,8 +70,9 @@ def write_docs(folder, acme_topics=("parental controls", "guest network", "port 
 
 
 def make_settings(folder, size=80, overlap=10) -> Settings:
+    # Plain chunks: contextual headers have their own tests (test_contextual_headers.py)
     return Settings(_env_file=None, documents_dir=str(folder), qdrant_collection_prefix="rag_test",
-                    chunk_size=size, chunk_overlap=overlap)
+                    chunk_size=size, chunk_overlap=overlap, contextual_headers=False)
 
 
 def qdrant_running() -> bool:
@@ -100,9 +101,10 @@ def test_point_id_is_deterministic_and_from_chunk_id_only():
 
 
 def test_collection_name_follows_chunk_settings():
-    assert Settings(_env_file=None).collection_name == "rag_350_60"
-    assert Settings(_env_file=None, chunk_size=200, chunk_overlap=40).collection_name == "rag_200_40"
-    assert Settings(_env_file=None, qdrant_collection_suffix="ctx").collection_name == "rag_350_60_ctx"
+    assert Settings(_env_file=None).collection_name == "rag_500_60_ctx"  # headers on by default (Step 12)
+    plain = {"_env_file": None, "contextual_headers": False}
+    assert Settings(**plain, chunk_size=200, chunk_overlap=40).collection_name == "rag_200_40"
+    assert Settings(**plain, chunk_size=350, qdrant_collection_suffix="exp").collection_name == "rag_350_60_exp"
 
 
 def test_recreate_needs_the_collection_name(tmp_path):

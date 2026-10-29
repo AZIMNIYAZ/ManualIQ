@@ -91,9 +91,9 @@ def test_payload_text_is_the_chunk_text_and_records_the_header():
     assert on["text"] == off["text"] == c.text and on["header_version"] == HEADER_VERSION
 
 
-def test_collection_name_and_default_off():
-    assert Settings(_env_file=None).contextual_headers is False
-    assert Settings(_env_file=None, chunk_size=500).collection_name == "rag_500_60"
+def test_collection_name_and_default_on():
+    assert Settings(_env_file=None).contextual_headers is True  # default since Step 12
+    assert Settings(_env_file=None, contextual_headers=False).collection_name == "rag_500_60"
     assert Settings(_env_file=None, chunk_size=500, contextual_headers=True).collection_name == "rag_500_60_ctx"
     assert Settings(_env_file=None, embedding_model_revision="5c38ec7c40").embedding_model_version == \
         "BAAI/bge-small-en-v1.5@5c38ec7"

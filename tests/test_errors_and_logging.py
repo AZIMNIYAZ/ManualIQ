@@ -162,7 +162,8 @@ def test_one_complete_chat_event_with_privacy(fake_search, logs, log_user_text):
     for key in ("session_id", "user_message", "retrieved", "cited", "found_in_documents", "warnings", "tokens",
                 "timings_ms", "models", "versions", "brands", "brand_source", "history_used"):
         assert key in e, key
-    assert set(e["timings_ms"]) == {"rewrite", "checks", "embed", "vector_search", "generate", "total"}
+    assert set(e["timings_ms"]) == {"rewrite", "checks", "embed", "vector_search", "generate", "fallback", "total"}
+    assert e["fallback"] is None and e["timings_ms"]["fallback"] == 0.0  # answered: the fallback only runs after a refusal
     assert e["answer"] == {"chars": len("Click Add [1].")}  # answers are never logged in full
     expected = "How do I set up port forwarding?" if log_user_text else {"chars": 32}
     assert e["user_message"] == expected
