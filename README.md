@@ -19,21 +19,16 @@ question ─► (follow-up? rewrite into a standalone question, Redis history)
 Measured on 40 questions + 6 conversations (development set) and 15 frozen held-out questions that
 were never used for decisions. Details, every experiment and every accepted item: `evaluation/EXPERIMENTS.md`.
 
-| | Step 11 baseline | Final (Step 12) |
+| |  baseline | Final |
 |---|---|---|
 | Development set (73 answer runs) | 75% | 94% automatic, 100% after human review |
 | Held-out set (23 answer runs) | 23/23 | 21/23 automatic, 22/23 after review |
 | False answers (answering when the manuals do not contain the answer) | 0 | 0 on every set |
 
-What Step 12 changed: 500/60 chunks, contextual headers in the embeddings, the retrieval fallback,
+What final changed: 500/60 chunks, contextual headers in the embeddings, the retrieval fallback,
 answer prompt 1.2 and a 1,500-token answer limit. Tried and rejected (no clear gain): hybrid BM25
 search, cross-encoder re-ranking, parent-child chunking and rewriting every query.
 
-## Scope: text-only
-
-The system uses the text layer of the PDFs only. Images, screenshots and diagrams are not
-processed (no OCR, no image models). Tables are included as flattened text; their structure
-is not reconstructed. Questions whose answers exist only in images are out of scope.
 
 ## Setup
 
@@ -171,7 +166,7 @@ python scripts/eval_compare.py evaluation/results/<A> evaluation/results/<B>   #
 - **Repeats:** tables and context-confusion questions run 3 times, and every run is shown.
 - **Outputs:** each run saves `config.json` (all versions, models, settings and the dataset hash), `results.jsonl` and `summary.md` under `evaluation/results/`, which Git ignores. `eval_compare.py` refuses to compare runs made on different datasets.
 
-Step 12 additions: `--questions-file evaluation/fallback_probes.jsonl` (11 questions about features the
+final additions: `--questions-file evaluation/fallback_probes.jsonl` (11 questions about features the
 manuals do not have, to check the fallback never invents answers), `--conversations cv-02,cv-04` and
 `--holdout` (typed confirmation; baseline and final configuration only).
 
@@ -184,26 +179,6 @@ filter and merged with the first results, and the answer model answers the origi
 Answered questions never enter it. Each alternative must keep the question's technical terms
 ("AiMesh", "6 GHz", "OpenVPN") and add no brand, so an unsupported feature is never swapped for a
 supported one. A second refusal is final.
-
-## Known limitations
-
-Answers (details in `evaluation/EXPERIMENTS.md`):
-- The fallback only runs after a refusal: an answer built on similar but wrong pages does not trigger it.
-- The fallback's term check treats common abbreviations such as "IP" as protected terms, so a correct
-  alternative search ("Set up Dynamic DNS") can be rejected and the refusal stands.
-- "Can it…?" questions may be answered "yes, with feature X" without the steps; ask "how?" to get them.
-- Features that are only loosely related are not offered as alternatives: the answer is a refusal.
-- Refusals take a few seconds longer (one more search and answer).
-- Text only: steps that refer to icons lose the icon ("click [icon] under Network Topology").
-
-Engineering, fine for this single-user project:
-- If a write fails part-way, the collection is reported as `mixed` and ingestion must be
-  re-run. Production fix: build a new collection and switch a Qdrant alias atomically.
-- The "one ingestion at a time" lock is per process: it covers the API with one worker,
-  not the API and `scripts/ingest.py` running at the same moment.
-- Two simultaneous `/chat` requests on the same session could interleave their turns in
-  the history (each turn itself is written atomically). One user in one chat does not
-  send overlapping requests, so no per-session lock is used.
 
 ## Conversations
 
