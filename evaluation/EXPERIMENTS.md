@@ -446,7 +446,7 @@ is word for word in source [1], but the answer was truncated and counted as a fa
 | False answers (every set, probes included) | 0 | 0 | **0** |
 
 **Held-out runs.** Each setup was run once:
-- **Baseline:** `…233318_rag_350_60_generation_holdout_final_baseline`, run from commit f8e820c in a separate
+- **Baseline:** `…233318_rag_350_60_generation_holdout_final_baseline`, run from commit db5993f (recorded in the run as f8e820c, its ID before the author email was changed for publishing) in a separate
   worktree with the Step 11 settings. 4 calls hit xAI's rate limit and were rerun once with the same setup
   (`…233719_…retry`).
 - **Final:** `…233903_rag_500_60_ctx_generation_holdout_final`.
