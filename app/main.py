@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from app.api import chat, health, ingest, search, sessions
+from app.api import chat, frontend, health, ingest, search, sessions
 from app.core.config import get_settings
 from app.core.errors import install_error_handlers, register_secret
 from app.core.logging import RequestIdMiddleware, setup_logging
@@ -55,6 +55,7 @@ def create_app() -> FastAPI:
     app.include_router(search.router)
     app.include_router(chat.router)
     app.include_router(sessions.router)
+    app.include_router(frontend.router)  # the chat page at /
     return app
 
 
