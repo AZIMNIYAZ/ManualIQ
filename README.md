@@ -21,9 +21,11 @@ were never used for decisions. Details, every experiment and every accepted item
 
 | |  baseline | Final |
 |---|---|---|
-| Development set (73 answer runs) | 75% | 94% automatic, 100% after human review |
-| Held-out set (23 answer runs) | 23/23 | 21/23 automatic, 22/23 after review |
+| Development set (73 answer runs) | 75% | 94% automatic |
+| Held-out set (23 answer runs) | 20/23 | 21/23 automatic, 22/23 after review |
 | False answers (answering when the manuals do not contain the answer) | 0 | 0 on every set |
+
+The final system achieved 94% automatic answer accuracy on the development set. In cases where the manuals did not provide sufficient evidence to answer confidently, the system was designed to refuse rather than generate unsupported information. Human review assessed these refusals and distinguished acceptable refusals from genuine answer failures.
 
 What final changed: 500/60 chunks, contextual headers in the embeddings, the retrieval fallback,
 answer prompt 1.2 and a 1,500-token answer limit. Tried and rejected (no clear gain): hybrid BM25
