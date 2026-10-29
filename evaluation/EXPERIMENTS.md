@@ -9,6 +9,9 @@ The development set's hash became `c03b2b01c65f` on 2026-10-28: the key fact of 
 both of the manual's spellings, "Network Service Filter" or "Network Services Filter" (see "Fix B"). Runs before
 and after are compared with `eval_compare.py --force`.
 
+Rejected experiments were kept on local git branches (`r3-hybrid`, `r4-rerank`, `p1-parent-child`,
+`q1-query-rewrite`); these branches are not published. Their results are recorded below.
+
 **Final configuration (the defaults since Step 12):** `rag_500_60_ctx` (500/60 + contextual headers),
 retrieval fallback on, answer prompt 1.2, answer output limit 1,500 tokens. Results: see "Final results".
 
